@@ -276,21 +276,21 @@ function isNodeInActivePath(nodeId: string, treeData: TreeData): boolean {
 }
 
 
-function ConversationNodeComponent({ data }: NodeProps) {
-  const { prompt, isActive, isInActivePath, timestamp, branchLabel, isDarkMode } = data;
+function ConversationNodeComponent({ data, id }: NodeProps) {
+  const { prompt, response, isActive, isInActivePath, timestamp, branchLabel, isDarkMode, isHighlighted, onDelete, isHovered } = data;
 
   const nodeColors = isDarkMode ? {
-    nodeBg: '#2f2f2f',
-    promptBg: isActive ? '#3d3d3d' : '#353535',
-    border: isActive ? '#3b82f6' : isInActivePath ? '#60a5fa' : '#4a4a4a',
-    borderColor: '#4a4a4a',
-    textColor: '#ececec',
+    nodeBg: isHighlighted ? '#1e3a5f' : '#1a2f4f',
+    promptBg: isActive ? '#253a5f' : isHighlighted ? '#2a4569' : '#1f3454',
+    border: isHighlighted ? '#60a5fa' : isActive ? '#3b82f6' : isInActivePath ? '#60a5fa' : '#2a4569',
+    borderColor: '#2a4569',
+    textColor: '#e0f2fe',
   } : {
-    nodeBg: '#ffffff',
-    promptBg: isActive ? '#eff6ff' : '#f8fafc',
-    border: isActive ? '#3b82f6' : isInActivePath ? '#60a5fa' : '#cbd5e1',
-    borderColor: '#e2e8f0',
-    textColor: '#1e293b',
+    nodeBg: isHighlighted ? '#e6f2ff' : '#f0f7ff',
+    promptBg: isActive ? '#d6ebff' : isHighlighted ? '#cce7ff' : '#e6f2ff',
+    border: isHighlighted ? '#007aff' : isActive ? '#0051d5' : isInActivePath ? '#007aff' : '#b3d9ff',
+    borderColor: '#cce7ff',
+    textColor: '#003d7a',
   };
 
   return (
@@ -299,11 +299,67 @@ function ConversationNodeComponent({ data }: NodeProps) {
         borderRadius: '12px',
         border: `2px solid ${nodeColors.border}`,
         backgroundColor: nodeColors.nodeBg,
-        boxShadow: isActive ? '0 4px 16px rgba(59, 130, 246, 0.3)' : '0 2px 8px rgba(0,0,0,0.1)',
+        boxShadow: isHighlighted 
+          ? (isDarkMode 
+              ? '0 4px 20px rgba(96, 165, 250, 0.4)' 
+              : '0 4px 20px rgba(0, 122, 255, 0.3)')
+          : isActive 
+          ? (isDarkMode
+              ? '0 4px 16px rgba(59, 130, 246, 0.3)'
+              : '0 4px 16px rgba(0, 81, 213, 0.25)')
+          : (isDarkMode
+              ? '0 2px 8px rgba(0, 0, 0, 0.3)'
+              : '0 2px 8px rgba(0, 122, 255, 0.1)'),
         overflow: 'hidden',
+        position: 'relative',
+        transition: 'all 0.2s ease',
       }}
+      onMouseEnter={() => data.onMouseEnter?.(id)}
+      onMouseLeave={() => data.onMouseLeave?.()}
     >
       <Handle type="target" position={Position.Top} />
+      
+      {/* Delete Button - Show on hover */}
+      {isHovered && onDelete && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (window.confirm('Delete this node and all its children?')) {
+              onDelete(id);
+            }
+          }}
+          style={{
+            position: 'absolute',
+            top: '8px',
+            right: '8px',
+            width: '24px',
+            height: '24px',
+            borderRadius: '6px',
+            border: 'none',
+            backgroundColor: isDarkMode ? 'rgba(239, 68, 68, 0.9)' : '#ef4444',
+            color: '#ffffff',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '14px',
+            fontWeight: 600,
+            zIndex: 10,
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+            transition: 'all 0.2s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.1)';
+            e.currentTarget.style.backgroundColor = '#dc2626';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(239, 68, 68, 0.9)' : '#ef4444';
+          }}
+        >
+          ×
+        </button>
+      )}
       
       {/* Prompt Section */}
       <div
@@ -318,7 +374,9 @@ function ConversationNodeComponent({ data }: NodeProps) {
             style={{
               fontSize: '11px',
               fontWeight: 600,
-              color: '#3b82f6',
+              color: isHighlighted 
+                ? (isDarkMode ? '#60a5fa' : '#007aff')
+                : (isDarkMode ? '#3b82f6' : '#0051d5'),
               textTransform: 'uppercase',
               letterSpacing: '0.5px',
             }}
@@ -343,7 +401,11 @@ function ConversationNodeComponent({ data }: NodeProps) {
             {prompt}
         </div>
         
-        <div style={{ fontSize: '11px', color: isDarkMode ? '#8a8a8a' : '#94a3b8', marginTop: '12px' }}>
+        <div style={{ 
+          fontSize: '11px', 
+          color: isDarkMode ? '#93c5fd' : '#5a9bd4', 
+          marginTop: '12px' 
+        }}>
           {new Date(timestamp).toLocaleString(undefined, { 
             year: 'numeric', 
             month: 'numeric', 
@@ -380,9 +442,13 @@ export function ConversationTreeChatbot() {
   const [isDragging, setIsDragging] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [streamingResponses, setStreamingResponses] = useState<Map<string, string>>(new Map());
+  const [examplePrompt, setExamplePrompt] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
   // Initialize ReactFlow instance
   const onInit = useCallback((instance: ReactFlowInstance) => {
@@ -433,23 +499,6 @@ export function ConversationTreeChatbot() {
     }, 100);
   }, []);
 
-  useEffect(() => {
-    const { nodes: layoutedNodes, edges: layoutedEdges } = layoutNodes(treeData);
-    const nodesWithTheme = layoutedNodes.map(node => ({
-      ...node,
-      data: {
-        ...node.data,
-        isDarkMode,
-      },
-    }));
-    setNodes(nodesWithTheme);
-    setEdges(layoutedEdges);
-  }, [treeData, isDarkMode]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [treeData.nodes.length, treeData.activeNodeId]);
-
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
     []
@@ -460,6 +509,45 @@ export function ConversationTreeChatbot() {
     []
   );
 
+  const matchesSearch = useCallback((node: ConversationNode, query: string): boolean => {
+    if (!query.trim()) return false;
+    const lowerQuery = query.toLowerCase();
+    return node.prompt.toLowerCase().includes(lowerQuery) || 
+           node.response.toLowerCase().includes(lowerQuery);
+  }, []);
+
+  const getAllDescendants = useCallback((nodeId: string, allNodes: ConversationNode[]): string[] => {
+    const children = allNodes.filter(n => n.parentId === nodeId).map(n => n.id);
+    const descendants: string[] = [];
+    for (const childId of children) {
+      descendants.push(childId);
+      descendants.push(...getAllDescendants(childId, allNodes));
+    }
+    return descendants;
+  }, []);
+
+  const handleDeleteNode = useCallback((nodeId: string) => {
+    setTreeData((prev) => {
+      const nodeToDelete = prev.nodes.find(n => n.id === nodeId);
+      if (!nodeToDelete) return prev;
+      
+      const descendants = getAllDescendants(nodeId, prev.nodes);
+      const idsToDelete = new Set([nodeId, ...descendants]);
+      const remainingNodes = prev.nodes.filter(n => !idsToDelete.has(n.id));
+      
+      let newActiveNodeId = prev.activeNodeId;
+      if (idsToDelete.has(prev.activeNodeId || '')) {
+        newActiveNodeId = remainingNodes.length > 0 ? remainingNodes[remainingNodes.length - 1].id : null;
+      }
+      
+      return {
+        ...prev,
+        nodes: remainingNodes,
+        activeNodeId: newActiveNodeId,
+      };
+    });
+  }, [getAllDescendants]);
+
   const onNodeClick = useCallback((_event: React.MouseEvent, node: Node) => {
     setTreeData((prev) => ({
       ...prev,
@@ -468,11 +556,105 @@ export function ConversationTreeChatbot() {
     focusNode(node.id);
   }, [focusNode]);
 
-  const handleSendPrompt = useCallback(async () => {
-    if (!newPrompt.trim() || isLoading) return;
+  useEffect(() => {
+    const { nodes: layoutedNodes, edges: layoutedEdges } = layoutNodes(treeData);
+    const nodesWithTheme = layoutedNodes.map(node => {
+      const conversationNode = treeData.nodes.find(n => n.id === node.id);
+      const isHighlighted = conversationNode && searchQuery.trim() 
+        ? matchesSearch(conversationNode, searchQuery)
+        : false;
+      
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          isDarkMode,
+          isHighlighted,
+          onDelete: handleDeleteNode,
+          onMouseEnter: (nodeId: string) => setHoveredNodeId(nodeId),
+          onMouseLeave: () => setHoveredNodeId(null),
+          isHovered: hoveredNodeId === node.id,
+        },
+      };
+    });
+    setNodes(nodesWithTheme);
+    setEdges(layoutedEdges);
+  }, [treeData, isDarkMode, searchQuery, matchesSearch, handleDeleteNode, hoveredNodeId]);
 
-    const promptText = newPrompt.trim();
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [treeData.nodes.length, treeData.activeNodeId]);
+
+  const examplePrompts = [
+    "Do you want to know what is a neural network?",
+    "Want to learn about machine learning?",
+    "Curious about how AI works?",
+    "Want to explore deep learning?",
+    "Interested in natural language processing?",
+    "Want to understand transformers?",
+    "Curious about computer vision?",
+    "Want to learn about reinforcement learning?",
+  ];
+
+  useEffect(() => {
+    if (treeData.nodes.length > 0) {
+      setExamplePrompt('');
+      return;
+    }
+
+    let typingTimeout: ReturnType<typeof setTimeout>;
+    let nextPromptTimeout: ReturnType<typeof setTimeout>;
+    let currentText = '';
+    let isDeleting = false;
+    let promptIndex = 0;
+
+    const typeText = () => {
+      const targetText = examplePrompts[promptIndex];
+      
+      if (isDeleting) {
+        if (currentText.length > 0) {
+          currentText = currentText.slice(0, -1);
+          setExamplePrompt(currentText);
+          typingTimeout = setTimeout(typeText, 30);
+        } else {
+          isDeleting = false;
+          promptIndex = (promptIndex + 1) % examplePrompts.length;
+          nextPromptTimeout = setTimeout(typeText, 200);
+        }
+      } else {
+        if (currentText.length < targetText.length) {
+          currentText = targetText.slice(0, currentText.length + 1);
+          setExamplePrompt(currentText);
+          typingTimeout = setTimeout(typeText, 50);
+        } else {
+          nextPromptTimeout = setTimeout(() => {
+            isDeleting = true;
+            typeText();
+          }, 5000);
+        }
+      }
+    };
+
+    typeText();
+
+    return () => {
+      clearTimeout(typingTimeout);
+      clearTimeout(nextPromptTimeout);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [treeData.nodes.length]);
+
+  const handleSendPrompt = useCallback(async () => {
+    let promptText = newPrompt.trim();
+    
+    if (treeData.nodes.length === 0 && (promptText.toLowerCase() === 'yes' || promptText.toLowerCase() === 'y') && examplePrompt) {
+      promptText = examplePrompt;
+    } else if (!promptText || isLoading) {
+      return;
+    }
+    
     setNewPrompt('');
+    setExamplePrompt('');
     setIsLoading(true);
     
     const tempNodeId = `temp_${Date.now()}`;
@@ -597,15 +779,15 @@ export function ConversationTreeChatbot() {
     } finally {
       setIsLoading(false);
     }
-  }, [newPrompt, treeData.activeNodeId, treeData.nodes, focusNode, isLoading]);
+  }, [newPrompt, treeData.activeNodeId, treeData.nodes, treeData.nodes.length, focusNode, isLoading, examplePrompt]);
 
   const actualLeftWidth = isLeftMinimized ? 0 : isRightMinimized ? 100 : leftWidth;
   const actualRightWidth = isRightMinimized ? 0 : isLeftMinimized ? 100 : (100 - leftWidth);
 
   const theme = isDarkMode ? {
-    chatBg: '#121212',
-    graphBg: '#181818',
-    containerBg: '#000000',
+    chatBg: '#0f172a',
+    graphBg: '#1e293b',
+    containerBg: '#0a1220',
     messageBg: 'rgba(255, 255, 255, 0.08)',
     messageText: '#ffffff',
     userMessageBg: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',
@@ -621,13 +803,13 @@ export function ConversationTreeChatbot() {
     buttonBorder: 'rgba(255, 255, 255, 0.2)',
     hoverBg: 'rgba(255, 255, 255, 0.15)',
     avatarBg: '#60a5fa',
-    scrollbarTrack: '#181818',
-    scrollbarThumb: '#404040',
+    scrollbarTrack: '#1e293b',
+    scrollbarThumb: '#475569',
     accent: '#60a5fa',
     shadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
   } : {
-    chatBg: '#ffffff',
-    graphBg: '#fafafa',
+    chatBg: '#f0f7ff',
+    graphBg: '#e6f2ff',
     containerBg: '#ffffff',
     messageBg: 'rgba(0, 0, 0, 0.04)',
     messageText: '#1d1d1f',
@@ -644,19 +826,449 @@ export function ConversationTreeChatbot() {
     buttonBorder: 'rgba(0, 0, 0, 0.1)',
     hoverBg: 'rgba(0, 0, 0, 0.06)',
     avatarBg: '#007aff',
-    scrollbarTrack: '#f5f5f5',
-    scrollbarThumb: '#d1d1d1',
+    scrollbarTrack: '#e6f2ff',
+    scrollbarThumb: '#b3d9ff',
     accent: '#007aff',
     shadow: '0 4px 24px rgba(0, 0, 0, 0.08)',
   };
 
   if (showAnalytics) {
-    return (
+  return (
       <TokenAnalytics
         sessionId="default"
         isDarkMode={isDarkMode}
         onClose={() => setShowAnalytics(false)}
       />
+    );
+  }
+
+  if (showHowItWorks) {
+    return (
+      <div style={{
+        padding: '48px',
+        backgroundColor: theme.chatBg,
+        minHeight: '100vh',
+        height: '100vh',
+        overflowY: 'auto',
+        color: theme.messageText,
+        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif',
+      }}>
+        <div style={{
+          maxWidth: '800px',
+          margin: '0 auto',
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            marginBottom: '48px',
+          }}>
+            <h1 style={{
+              margin: 0,
+              fontSize: '48px',
+              fontWeight: 600,
+              color: theme.messageText,
+              letterSpacing: '-1px',
+              lineHeight: '1.1',
+            }}>
+              How It Works
+            </h1>
+        <button
+              onClick={() => setShowHowItWorks(false)}
+          style={{
+                padding: '8px 16px',
+                backgroundColor: 'transparent',
+                color: theme.secondaryText,
+                border: `1px solid ${theme.inputBorder}`,
+                borderRadius: '8px',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                fontWeight: 400,
+            fontSize: '15px',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme.hoverBg;
+                e.currentTarget.style.color = theme.messageText;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = theme.secondaryText;
+              }}
+            >
+              Close
+            </button>
+          </div>
+
+          <div style={{
+            backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+            padding: '32px',
+            borderRadius: '16px',
+            marginBottom: '32px',
+            border: `1px solid ${theme.inputBorder}`,
+          }}>
+            <h2 style={{
+              marginTop: 0,
+              marginBottom: '16px',
+              fontSize: '28px',
+            fontWeight: 600,
+              color: theme.messageText,
+              letterSpacing: '-0.5px',
+            }}>
+              About Clarity
+            </h2>
+            <p style={{
+              fontSize: '17px',
+              lineHeight: '1.7',
+              color: theme.secondaryText,
+              marginBottom: '16px',
+            }}>
+              Clarity is an AI conversation tool that reduces token costs by 60-80% by storing conversation history as images instead of text. This innovative approach leverages vision models' efficient image processing to dramatically cut down on API costs.
+            </p>
+            <p style={{
+              fontSize: '17px',
+              lineHeight: '1.7',
+              color: theme.secondaryText,
+              marginBottom: 0,
+            }}>
+              Instead of sending all previous messages as text (which can cost thousands of tokens), Clarity converts your conversation history into a compact image. Vision tokens are much cheaper than text tokens, resulting in significant savings.
+            </p>
+          </div>
+
+          <div style={{
+            backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+            padding: '32px',
+            borderRadius: '16px',
+            marginBottom: '32px',
+            border: `1px solid ${theme.inputBorder}`,
+          }}>
+            <h2 style={{
+              marginTop: 0,
+              marginBottom: '24px',
+              fontSize: '28px',
+              fontWeight: 600,
+              color: theme.messageText,
+              letterSpacing: '-0.5px',
+            }}>
+              Token Savings Formula
+            </h2>
+            <div style={{
+              backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.05)',
+              padding: '24px',
+              borderRadius: '12px',
+              marginBottom: '24px',
+              fontFamily: 'monospace',
+            }}>
+              <div style={{
+                fontSize: '18px',
+                color: theme.messageText,
+                marginBottom: '12px',
+                fontWeight: 600,
+              }}>
+                Token Savings = Text Equivalent - (Vision Tokens + Text Tokens)
+              </div>
+            </div>
+
+            <h3 style={{
+              marginTop: '32px',
+              marginBottom: '16px',
+              fontSize: '20px',
+              fontWeight: 600,
+              color: theme.messageText,
+            }}>
+              Text Equivalent Tokens
+            </h3>
+            <div style={{
+              backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.05)',
+              padding: '20px',
+              borderRadius: '12px',
+              marginBottom: '24px',
+              fontFamily: 'monospace',
+              fontSize: '15px',
+              color: theme.secondaryText,
+            }}>
+              Text Equivalent = (Total Characters + Overhead) ÷ 4
+              <div style={{ marginTop: '8px', fontSize: '13px', opacity: 0.8 }}>
+                Overhead = Number of Messages × 10
+              </div>
+            </div>
+            <p style={{
+              fontSize: '15px',
+              lineHeight: '1.6',
+              color: theme.secondaryText,
+              marginBottom: '24px',
+            }}>
+              This represents what it would cost to send all conversation history as text tokens. We estimate ~4 characters per token, plus a small overhead for message formatting.
+            </p>
+
+            <h3 style={{
+              marginTop: '32px',
+              marginBottom: '16px',
+              fontSize: '20px',
+              fontWeight: 600,
+              color: theme.messageText,
+            }}>
+              Vision Tokens
+            </h3>
+            <div style={{
+              backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.05)',
+              padding: '20px',
+              borderRadius: '12px',
+              marginBottom: '24px',
+              fontFamily: 'monospace',
+              fontSize: '15px',
+              color: theme.secondaryText,
+            }}>
+              Vision Tokens = Tiles × 258
+              <div style={{ marginTop: '8px', fontSize: '13px', opacity: 0.8 }}>
+                Tiles = ⌈Width ÷ 768⌉ × ⌈Height ÷ 768⌉
+              </div>
+            </div>
+            <p style={{
+              fontSize: '15px',
+              lineHeight: '1.6',
+              color: theme.secondaryText,
+              marginBottom: '24px',
+            }}>
+              Gemini processes images in 768×768 pixel tiles. Each tile costs 258 tokens. Our system optimizes images to fit in a single horizontal tile (768px wide) to minimize costs. The image height can extend as needed, but each additional 768px of height adds another tile.
+            </p>
+
+            <h3 style={{
+              marginTop: '32px',
+              marginBottom: '16px',
+              fontSize: '20px',
+              fontWeight: 600,
+              color: theme.messageText,
+            }}>
+              Text Tokens
+            </h3>
+            <div style={{
+              backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.05)',
+              padding: '20px',
+              borderRadius: '12px',
+              marginBottom: '24px',
+              fontFamily: 'monospace',
+              fontSize: '15px',
+              color: theme.secondaryText,
+            }}>
+              Text Tokens = Prompt Text Length ÷ 4
+            </div>
+            <p style={{
+              fontSize: '15px',
+              lineHeight: '1.6',
+              color: theme.secondaryText,
+              marginBottom: 0,
+            }}>
+              The tokens used for your current prompt (user message + system instructions). This is the same whether using text or image context.
+            </p>
+          </div>
+
+          <div style={{
+            backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+            padding: '32px',
+            borderRadius: '16px',
+            marginBottom: '32px',
+            border: `1px solid ${theme.inputBorder}`,
+          }}>
+            <h2 style={{
+              marginTop: 0,
+              marginBottom: '16px',
+              fontSize: '28px',
+              fontWeight: 600,
+              color: theme.messageText,
+              letterSpacing: '-0.5px',
+            }}>
+              Example Calculation
+            </h2>
+            <div style={{
+              backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.05)',
+              padding: '24px',
+              borderRadius: '12px',
+              marginBottom: '16px',
+            }}>
+              <div style={{
+                fontSize: '15px',
+                color: theme.secondaryText,
+                marginBottom: '12px',
+                lineHeight: '1.8',
+              }}>
+                <strong style={{ color: theme.messageText }}>Scenario:</strong> 10-message conversation
+                <br />
+                <strong style={{ color: theme.messageText }}>Text Equivalent:</strong> 3,000 tokens
+                <br />
+                <strong style={{ color: theme.messageText }}>Vision Tokens:</strong> 516 tokens (2 tiles)
+                <br />
+                <strong style={{ color: theme.messageText }}>Text Tokens:</strong> 50 tokens
+                <br />
+                <br />
+                <strong style={{ color: theme.accent, fontSize: '17px' }}>Savings = 3,000 - (516 + 50) = 2,434 tokens (81%)</strong>
+              </div>
+            </div>
+            <p style={{
+              fontSize: '15px',
+              lineHeight: '1.6',
+              color: theme.secondaryText,
+              marginBottom: 0,
+            }}>
+              As conversations get longer, the savings increase dramatically. Short conversations (1-3 messages) save 0-30%, while long conversations (10+ messages) can save 60-80%.
+            </p>
+          </div>
+
+          <div style={{
+            backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
+            padding: '32px',
+            borderRadius: '16px',
+            marginBottom: '32px',
+            border: `1px solid ${theme.inputBorder}`,
+          }}>
+            <h2 style={{
+              marginTop: 0,
+              marginBottom: '16px',
+              fontSize: '28px',
+              fontWeight: 600,
+              color: theme.messageText,
+              letterSpacing: '-0.5px',
+            }}>
+              Why Short Conversations Show Low Savings
+            </h2>
+            <p style={{
+              fontSize: '15px',
+              lineHeight: '1.7',
+              color: theme.secondaryText,
+              marginBottom: '16px',
+            }}>
+              If you're seeing low savings (e.g., 6%), it's likely because your conversations are short. Here's why:
+            </p>
+            <div style={{
+              backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.05)',
+              padding: '20px',
+              borderRadius: '12px',
+              marginBottom: '16px',
+            }}>
+              <div style={{
+                fontSize: '15px',
+                color: theme.secondaryText,
+                lineHeight: '1.8',
+              }}>
+                <strong style={{ color: theme.messageText }}>Short Conversation (2 messages):</strong>
+                <br />
+                • Text Equivalent: ~400 tokens
+                <br />
+                • Vision Tokens: 258 tokens (1 tile minimum)
+                <br />
+                • Text Tokens: ~30 tokens (minimal prompt)
+                <br />
+                • <strong style={{ color: theme.accent }}>Savings: ~112 tokens (28%)</strong>
+                <br />
+                <br />
+                <strong style={{ color: theme.messageText }}>Long Conversation (10+ messages):</strong>
+                <br />
+                • Text Equivalent: ~3,000 tokens
+                <br />
+                • Vision Tokens: 258-516 tokens (1-2 tiles)
+                <br />
+                • Text Tokens: ~30 tokens
+                <br />
+                • <strong style={{ color: theme.accent }}>Savings: ~2,400+ tokens (80%+)</strong>
+              </div>
+            </div>
+            <p style={{
+              fontSize: '15px',
+              lineHeight: '1.7',
+              color: theme.secondaryText,
+              marginBottom: 0,
+            }}>
+              <strong style={{ color: theme.messageText }}>Key Insight:</strong> Images cost a minimum of 258 tokens per tile. To see significant savings, you need enough conversation history to justify that fixed cost. The more messages you have, the better the savings ratio becomes!
+            </p>
+          </div>
+
+          <div style={{
+            backgroundColor: isDarkMode ? 'rgba(96, 165, 250, 0.1)' : 'rgba(0, 122, 255, 0.08)',
+            padding: '24px',
+            borderRadius: '16px',
+            marginBottom: '32px',
+            border: `1px solid ${isDarkMode ? 'rgba(96, 165, 250, 0.2)' : 'rgba(0, 122, 255, 0.15)'}`,
+          }}>
+            <h3 style={{
+              marginTop: 0,
+              marginBottom: '12px',
+              fontSize: '20px',
+              fontWeight: 600,
+              color: theme.accent,
+            }}>
+              💡 Tips to Increase Savings
+            </h3>
+            <ul style={{
+              fontSize: '15px',
+              lineHeight: '1.8',
+              color: theme.secondaryText,
+              margin: 0,
+              paddingLeft: '20px',
+            }}>
+              <li><strong style={{ color: theme.messageText }}>Have longer conversations:</strong> Continue chatting instead of starting fresh</li>
+              <li><strong style={{ color: theme.messageText }}>Build context:</strong> Ask follow-up questions to extend the conversation</li>
+              <li><strong style={{ color: theme.messageText }}>Use branches:</strong> Explore different conversation paths from the same context</li>
+              <li><strong style={{ color: theme.messageText }}>Monitor progress:</strong> Check analytics to see savings improve as conversations lengthen</li>
+            </ul>
+          </div>
+
+          <div style={{
+            display: 'flex',
+            gap: '16px',
+            marginTop: '48px',
+          }}>
+            <button
+              onClick={() => {
+                setShowHowItWorks(false);
+                setShowAnalytics(true);
+              }}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: theme.accent,
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '10px',
+            cursor: 'pointer',
+                fontSize: '16px',
+                fontWeight: 500,
+                transition: 'all 0.2s ease',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.2)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+              }}
+            >
+              View Analytics
+            </button>
+            <button
+              onClick={() => setShowHowItWorks(false)}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: 'transparent',
+                color: theme.messageText,
+                border: `1px solid ${theme.inputBorder}`,
+                borderRadius: '10px',
+                cursor: 'pointer',
+                fontSize: '16px',
+                fontWeight: 500,
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme.hoverBg;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              Back to Chat
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -678,10 +1290,10 @@ export function ConversationTreeChatbot() {
         display: 'flex',
         gap: '12px',
         alignItems: 'center',
-        zIndex: 50,
+            zIndex: 50,
       }}>
         {/* Theme Toggle Switch */}
-        {!isRightMinimized && (
+      {!isRightMinimized && (
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -694,9 +1306,9 @@ export function ConversationTreeChatbot() {
             }}>
               {isDarkMode ? 'Dark' : 'Light'}
             </span>
-            <button
-              onClick={() => setIsDarkMode(!isDarkMode)}
-              style={{
+        <button
+          onClick={() => setIsDarkMode(!isDarkMode)}
+          style={{
                 width: '44px',
                 height: '24px',
                 borderRadius: '12px',
@@ -705,22 +1317,22 @@ export function ConversationTreeChatbot() {
                 cursor: 'pointer',
                 position: 'relative',
                 transition: 'background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-              }}
-              title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-            >
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          }}
+          title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+        >
               <div style={{
                 width: '20px',
                 height: '20px',
                 borderRadius: '50%',
                 backgroundColor: '#ffffff',
-                position: 'absolute',
+            position: 'absolute',
                 top: '2px',
                 left: isDarkMode ? '22px' : '2px',
                 transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                 boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
               }} />
-            </button>
+        </button>
           </div>
         )}
         {/* Analytics Button */}
@@ -765,6 +1377,45 @@ export function ConversationTreeChatbot() {
           position: 'relative',
         }}
       >
+        {/* How It Works Button */}
+        <button
+          onClick={() => setShowHowItWorks(true)}
+          style={{
+            position: 'absolute',
+            top: '10px',
+            left: '10px',
+            padding: '8px 14px',
+            fontSize: '14px',
+            fontWeight: 500,
+            border: `1px solid ${theme.inputBorder}`,
+            backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)',
+            color: theme.messageText,
+            borderRadius: '8px',
+            cursor: 'pointer',
+            zIndex: 10,
+            transition: 'all 0.2s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = theme.hoverBg;
+            e.currentTarget.style.transform = 'translateY(-1px)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)';
+            e.currentTarget.style.transform = 'translateY(0)';
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+          How It Works
+        </button>
+
         {/* Minimize Button */}
         <button
           onClick={() => setIsLeftMinimized(true)}
@@ -777,9 +1428,9 @@ export function ConversationTreeChatbot() {
             padding: '0',
             fontSize: '16px',
             fontWeight: 600,
-            border: '1px solid #cbd5e1',
-            backgroundColor: '#ffffff',
-            color: '#64748b',
+            border: `1px solid ${theme.buttonBorder}`,
+            backgroundColor: theme.buttonBg,
+            color: theme.buttonText,
             borderRadius: '6px',
             cursor: 'pointer',
             zIndex: 10,
@@ -792,10 +1443,25 @@ export function ConversationTreeChatbot() {
           −
         </button>
 
+        {/* Divider line under How It Works button */}
+        <div
+          style={{
+            position: 'absolute',
+            top: '50px',
+            left: 0,
+            right: 0,
+            height: '2px',
+            backgroundColor: theme.divider,
+            zIndex: 5,
+            boxShadow: `0 1px 2px ${theme.divider}40`,
+          }}
+        />
+
         <div
           style={{
             flex: 1,
             padding: '24px',
+            paddingTop: '80px',
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
@@ -829,31 +1495,46 @@ export function ConversationTreeChatbot() {
                 justifyContent: 'center',
                 marginBottom: '8px',
                 boxShadow: theme.shadow,
+                animation: 'floatSlow 3s ease-in-out infinite',
               }}>
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                 </svg>
               </div>
-              <h2 style={{ 
-                margin: 0, 
-                fontSize: '24px', 
-                fontWeight: 600, 
-                color: theme.messageText, 
-                letterSpacing: '-0.5px',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif',
+              <div style={{
+                fontSize: '20px',
+                fontWeight: 500,
+                color: theme.messageText,
+                marginBottom: '8px',
+                letterSpacing: '-0.3px',
+                minHeight: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+                maxWidth: '500px',
               }}>
-                Start a conversation
-              </h2>
+                {examplePrompt}
+                <span style={{
+                  display: 'inline-block',
+                  width: '2px',
+                  height: '24px',
+                  backgroundColor: theme.accent,
+                  marginLeft: '4px',
+                  animation: 'blink 1s infinite',
+                }}></span>
+              </div>
               <p style={{ 
                 margin: 0, 
-                fontSize: '15px', 
+                fontSize: '14px', 
                 textAlign: 'center', 
                 maxWidth: '400px', 
                 lineHeight: '1.6', 
                 fontWeight: 400,
                 color: theme.secondaryText,
+                opacity: 0.7,
               }}>
-                Ask me anything, and I'll help you explore different conversation paths
+                Type "yes" to ask this question, or type your own
               </p>
             </div>
           )}
@@ -879,9 +1560,9 @@ export function ConversationTreeChatbot() {
                       maxWidth: '75%',
                       gap: '4px',
                     }}>
-                      <div
-                        style={{
-                          padding: '12px 16px',
+                  <div
+                    style={{
+                      padding: '12px 16px',
                           background: typeof theme.userMessageBg === 'string' && theme.userMessageBg.includes('gradient')
                             ? theme.userMessageBg
                             : theme.userMessageBg,
@@ -891,7 +1572,7 @@ export function ConversationTreeChatbot() {
                           color: theme.userMessageText,
                           borderRadius: '20px 20px 6px 20px',
                           fontSize: '15px',
-                          lineHeight: '1.5',
+                      lineHeight: '1.5',
                           wordWrap: 'break-word',
                           whiteSpace: 'pre-wrap',
                           fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif',
@@ -899,10 +1580,10 @@ export function ConversationTreeChatbot() {
                           maxWidth: '100%',
                           boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
                           backdropFilter: 'blur(10px)',
-                        }}
-                      >
-                        {node.prompt}
-                      </div>
+                    }}
+                  >
+                    {node.prompt}
+                  </div>
                       <div style={{
                         fontSize: '11px',
                         color: theme.secondaryText,
@@ -911,7 +1592,7 @@ export function ConversationTreeChatbot() {
                         letterSpacing: '0.2px',
                       }}>
                         {new Date(node.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </div>
+                </div>
                     </div>
                   </div>
 
@@ -947,14 +1628,14 @@ export function ConversationTreeChatbot() {
                       maxWidth: '75%',
                       gap: '4px',
                     }}>
-                      <div
-                        style={{
-                          padding: '12px 16px',
-                          backgroundColor: theme.messageBg,
-                          color: theme.messageText,
+                  <div
+                    style={{
+                      padding: '12px 16px',
+                      backgroundColor: theme.messageBg,
+                      color: theme.messageText,
                           borderRadius: '6px 20px 20px 20px',
                           fontSize: '15px',
-                          lineHeight: '1.5',
+                      lineHeight: '1.5',
                           wordWrap: 'break-word',
                           whiteSpace: 'pre-wrap',
                           position: 'relative',
@@ -989,12 +1670,12 @@ export function ConversationTreeChatbot() {
                               animation: 'pulse 1.4s ease-in-out 0.4s infinite',
                             }} />
                             <span style={{ marginLeft: '8px', color: theme.secondaryText }}>Thinking...</span>
-                          </div>
+                  </div>
                         ) : node.response.startsWith('Error:') ? (
                           <div style={{ color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span>⚠️</span>
                             <span>{node.response}</span>
-                          </div>
+                </div>
                         ) : (
                           <span>
                             {streamingResponses.get(node.id) || node.response}
@@ -1011,7 +1692,7 @@ export function ConversationTreeChatbot() {
                             )}
                           </span>
                         )}
-                      </div>
+              </div>
                       <div style={{
                         fontSize: '11px',
                         color: theme.secondaryText,
@@ -1172,7 +1853,7 @@ export function ConversationTreeChatbot() {
             }}>
               {treeData.nodes.length} message{treeData.nodes.length !== 1 ? 's' : ''}
               {treeData.activeNodeId && ' • Click nodes to branch'}
-            </div>
+          </div>
           )}
         </div>
       </div>
@@ -1249,24 +1930,30 @@ export function ConversationTreeChatbot() {
           backdropFilter: 'blur(20px)',
         }}
       >
+        {/* Controls in top right */}
+        <div style={{
+          position: 'absolute',
+          top: '10px',
+          right: '10px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          zIndex: 15,
+        }}>
         {/* Minimize Button */}
         <button
           onClick={() => setIsRightMinimized(true)}
           style={{
-            position: 'absolute',
-            top: '10px',
-            right: '10px',
             width: '28px',
             height: '28px',
             padding: '0',
             fontSize: '16px',
             fontWeight: 600,
-            border: '1px solid #cbd5e1',
-            backgroundColor: '#ffffff',
-            color: '#64748b',
+              border: `1px solid ${theme.buttonBorder}`,
+              backgroundColor: theme.buttonBg,
+              color: theme.buttonText,
             borderRadius: '6px',
             cursor: 'pointer',
-            zIndex: 10,
             boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
             display: 'flex',
             alignItems: 'center',
@@ -1275,6 +1962,95 @@ export function ConversationTreeChatbot() {
         >
           −
         </button>
+        </div>
+
+      {/* Search Bar */}
+      <div style={{
+        padding: '8px 12px',
+        paddingRight: '50px',
+        borderBottom: `1px solid ${theme.divider}`,
+        backgroundColor: theme.graphBg,
+        position: 'relative',
+        flexShrink: 0,
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          maxWidth: '280px',
+        }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={theme.secondaryText} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.6 }}>
+            <circle cx="11" cy="11" r="8"></circle>
+            <path d="m21 21-4.35-4.35"></path>
+          </svg>
+          <input
+            type="text"
+            placeholder="Search..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              padding: '4px 8px',
+              fontSize: '11px',
+              border: `1px solid ${theme.inputBorder}`,
+              borderRadius: '4px',
+              backgroundColor: theme.inputBg,
+              color: theme.inputText,
+              outline: 'none',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif',
+              transition: 'all 0.2s ease',
+              height: '24px',
+            }}
+            onFocus={(e) => {
+              e.target.style.borderColor = theme.accent;
+              e.target.style.boxShadow = `0 0 0 2px ${isDarkMode ? 'rgba(96, 165, 250, 0.1)' : 'rgba(0, 122, 255, 0.1)'}`;
+            }}
+            onBlur={(e) => {
+              e.target.style.borderColor = theme.inputBorder;
+              e.target.style.boxShadow = 'none';
+            }}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              style={{
+                padding: '2px 6px',
+                fontSize: '10px',
+                border: 'none',
+                borderRadius: '3px',
+                backgroundColor: theme.buttonBg,
+                color: theme.buttonText,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                flexShrink: 0,
+                height: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme.hoverBg;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = theme.buttonBg;
+              }}
+            >
+              ×
+            </button>
+          )}
+        </div>
+        {searchQuery && (
+          <div style={{
+            marginTop: '4px',
+            fontSize: '10px',
+            color: theme.secondaryText,
+            paddingLeft: '18px',
+          }}>
+            {nodes.filter(n => n.data.isHighlighted).length} found
+          </div>
+        )}
+      </div>
 
       {/* React Flow Canvas */}
       <div 
@@ -1304,15 +2080,19 @@ export function ConversationTreeChatbot() {
           panOnScroll={true}
           selectionOnDrag={false}
         >
-          <Background color="#94a3b8" gap={16} />
+          <Background 
+            color={isDarkMode ? "#2a4569" : "#b3d9ff"} 
+            gap={16} 
+          />
           <Controls />
           <MiniMap
             nodeColor={(node) => {
-              if (node.data.isActive) return '#3b82f6';
-              if (node.data.isInActivePath) return '#60a5fa';
-              return '#93c5fd';
+              if (node.data.isHighlighted) return isDarkMode ? '#60a5fa' : '#007aff';
+              if (node.data.isActive) return isDarkMode ? '#3b82f6' : '#0051d5';
+              if (node.data.isInActivePath) return isDarkMode ? '#60a5fa' : '#007aff';
+              return isDarkMode ? '#4a6fa5' : '#93c5fd';
             }}
-            maskColor="rgba(0, 0, 0, 0.1)"
+            maskColor={isDarkMode ? "rgba(0, 0, 0, 0.3)" : "rgba(0, 0, 0, 0.1)"}
           />
         </ReactFlow>
       </div>

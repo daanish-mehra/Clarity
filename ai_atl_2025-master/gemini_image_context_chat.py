@@ -16,16 +16,22 @@ from datetime import datetime
 class ImageContextStorage:
     """Handles conversion of text context to images for efficient storage."""
     
-    def __init__(self, width: int = 768, font_size: int = 10, 
-                 line_spacing: int = 3, padding: int = 10):
+    def __init__(self, width: int = 768, font_size: int = 8, 
+                 line_spacing: int = 1, padding: int = 6):
         """
         Initialize the image context storage.
         
+        Ultra-optimized defaults for maximum token savings:
+        - Smaller font (8px) fits more text per image
+        - Minimal line spacing (1px) maximizes text density
+        - Reduced padding (6px) maximizes text area
+        - These settings push the limit while maintaining readability
+        
         Args:
             width: Width of the generated image in pixels (default 768, max width for 1 horizontal tile)
-            font_size: Font size for text rendering (default 10)
-            line_spacing: Space between lines
-            padding: Padding around the text
+            font_size: Font size for text rendering (default 8, ultra-optimized for savings)
+            line_spacing: Space between lines (default 1, ultra-optimized for savings)
+            padding: Padding around the text (default 6, ultra-optimized for savings)
         """
         self.width = width
         self.font_size = font_size
@@ -109,19 +115,21 @@ class ImageContextStorage:
         all_lines = []
         
         # Process each message and wrap text
-        for msg in messages:
+        # Optimized: Minimal formatting to maximize text density
+        for i, msg in enumerate(messages):
             role = msg['role'].upper()
             content = msg['content']
             
-            # Add role header
-            all_lines.append(f"[{role}]")
+            # Minimal role header (shorter = more space for content)
+            all_lines.append(f"{role}:")
             
             # Wrap the content
             wrapped_lines = self.wrap_text(content, max_text_width, font)
             all_lines.extend(wrapped_lines)
             
-            # Add spacing between messages
-            all_lines.append("")
+            # Minimal spacing between messages (only if not last)
+            if i < len(messages) - 1:
+                all_lines.append("")
         
         # Calculate image height
         line_height = self.font_size + self.line_spacing
@@ -134,7 +142,7 @@ class ImageContextStorage:
         # Draw text
         y_position = self.padding
         for line in all_lines:
-            if line.startswith('['):  # Role headers in different color
+            if line.endswith(':'):  # Role headers (e.g., "USER:" or "MODEL:")
                 draw.text((self.padding, y_position), line, 
                          fill='#2563eb', font=font)
             else:

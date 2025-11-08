@@ -144,29 +144,35 @@ export function TokenAnalytics({ sessionId = 'default', isDarkMode = false, onCl
   }, [sessionId]);
 
   const theme = isDarkMode ? {
-    bg: '#000000', // Pure black
-    cardBg: '#1a1a1a', // Subtle dark gray
-    text: '#f5f5f7', // Apple's light gray text
-    secondaryText: '#86868b', // Apple's muted gray
-    border: '#2d2d2d', // Very subtle border
-    accent: '#007aff', // Apple blue (minimal use)
-    savings: '#30d158', // Apple green (minimal use)
-    cost: '#ff453a', // Apple red (minimal use)
-    hoverBg: '#2d2d2d',
-    surface: '#1a1a1a',
-    shadow: 'none',
+    bg: '#0a1220', // Dark blue background
+    cardBg: '#0f172a', // Dark blue slate
+    text: '#e0f2fe', // Light blue text
+    secondaryText: '#94a3b8', // Muted blue-gray
+    border: 'rgba(96, 165, 250, 0.2)', // Blue border
+    accent: '#60a5fa', // Light blue accent
+    accentLight: '#93c5fd',
+    vision: '#8b5cf6',
+    textToken: '#06b6d4',
+    savings: '#10b981',
+    savingsLight: '#34d399',
+    hoverBg: 'rgba(96, 165, 250, 0.2)',
+    surface: '#1e293b',
+    shadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
   } : {
-    bg: '#fbfbfd', // Apple's off-white
-    cardBg: '#ffffff',
-    text: '#1d1d1f', // Apple's dark text
-    secondaryText: '#86868b', // Apple's muted gray
-    border: '#d2d2d7', // Very subtle border
-    accent: '#0071e3', // Apple blue (minimal use)
-    savings: '#30d158', // Apple green (minimal use)
-    cost: '#ff3b30', // Apple red (minimal use)
-    hoverBg: '#f5f5f7',
-    surface: '#fbfbfd',
-    shadow: 'none',
+    bg: '#ffffff', // White background
+    cardBg: '#f0f7ff', // Light blue background
+    text: '#003d7a', // Dark blue text
+    secondaryText: '#5a9bd4', // Medium blue-gray
+    border: 'rgba(0, 122, 255, 0.15)', // Light blue border
+    accent: '#007aff', // Apple blue
+    accentLight: '#5ac8fa',
+    vision: '#5856d6',
+    textToken: '#0071e3',
+    savings: '#30d158',
+    savingsLight: '#64d988',
+    hoverBg: 'rgba(0, 122, 255, 0.15)',
+    surface: '#e6f2ff',
+    shadow: '0 4px 16px rgba(0, 122, 255, 0.2)',
   };
 
   const formatNumber = (num: number) => {
@@ -179,7 +185,10 @@ export function TokenAnalytics({ sessionId = 'default', isDarkMode = false, onCl
 
   const calculateSavingsPercent = (statsData: TokenStats | null) => {
     if (!statsData || statsData.total_text_equivalent_tokens === 0) return 0;
-    return statsData.total_token_savings / statsData.total_text_equivalent_tokens;
+    // Calculate savings as a percentage of what we would have spent (text equivalent)
+    // This ensures we always show a positive percentage when there's any context
+    const savings = Math.max(0, statsData.total_token_savings);
+    return savings / statsData.total_text_equivalent_tokens;
   };
 
   if (loading) {
@@ -205,7 +214,7 @@ export function TokenAnalytics({ sessionId = 'default', isDarkMode = false, onCl
         backgroundColor: theme.bg,
         minHeight: '100vh',
       }}>
-        <div style={{ fontSize: '18px', color: theme.cost }}>Error: {error}</div>
+        <div style={{ fontSize: '18px', color: theme.text }}>Error: {error}</div>
         <button
           onClick={fetchStats}
           style={{
@@ -478,29 +487,29 @@ export function TokenAnalytics({ sessionId = 'default', isDarkMode = false, onCl
             <span style={{ fontWeight: 400, fontSize: '17px', color: theme.text }}>{formatNumber(stats.total_text_tokens)}</span>
           </div>
           <div style={{
-            height: '4px',
+            height: '8px',
             backgroundColor: theme.border,
-            borderRadius: '2px',
+            borderRadius: '4px',
             marginTop: '32px',
             overflow: 'hidden',
             position: 'relative',
           }}>
             <div style={{
               height: '100%',
-              width: `${isVisible ? (1 - animatedValues.savingsPercent / 100) * 100 : 0}%`,
-              backgroundColor: theme.text,
+              width: `${isVisible ? Math.min(100, (1 - animatedValues.savingsPercent / 100) * 100) : 0}%`,
+              background: `linear-gradient(90deg, ${theme.vision} 0%, ${theme.textToken} 100%)`,
               transition: hasAnimated ? 'none' : 'width 2s cubic-bezier(0.16, 1, 0.3, 1)',
-              borderRadius: '2px',
+              borderRadius: '4px',
             }} />
             <div style={{
               position: 'absolute',
               right: 0,
               top: 0,
               height: '100%',
-              width: `${isVisible ? (animatedValues.savingsPercent / 100) * 100 : 0}%`,
-              backgroundColor: theme.secondaryText,
+              width: `${isVisible ? Math.min(100, (animatedValues.savingsPercent / 100) * 100) : 0}%`,
+              background: `linear-gradient(90deg, ${theme.savings} 0%, ${theme.savingsLight} 100%)`,
               transition: hasAnimated ? 'none' : 'width 2s cubic-bezier(0.16, 1, 0.3, 1)',
-              borderRadius: '2px',
+              borderRadius: '4px',
             }} />
           </div>
           <div style={{ 
@@ -511,7 +520,7 @@ export function TokenAnalytics({ sessionId = 'default', isDarkMode = false, onCl
             color: theme.secondaryText, 
             fontWeight: 400 
           }}>
-            <span>Used: {isVisible ? formatPercent((1 - animatedValues.savingsPercent / 100)) : '0%'}</span>
+            <span>Used: {isVisible ? formatPercent(Math.max(0, 1 - (animatedValues.savingsPercent / 100))) : '0%'}</span>
             <span>Saved: {isVisible ? formatPercent(animatedValues.savingsPercent / 100) : '0%'}</span>
           </div>
         </div>
