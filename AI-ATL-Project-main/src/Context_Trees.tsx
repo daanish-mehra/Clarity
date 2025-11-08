@@ -10,6 +10,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactFlow, {
   Background,
   Controls,
+  ControlButton,
   MiniMap,
   Node,
   Edge,
@@ -26,6 +27,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import './custom_scrollbar.css';
 import { TokenAnalytics } from './TokenAnalytics';
+import ReactMarkdown from 'react-markdown';
 
 
 interface ConversationNode {
@@ -76,6 +78,18 @@ function shiftBranchRight(nodeId: string, shiftAmount: number, allNodes: Convers
     const pos = lockedPositions.get(id);
     if (pos) {
       pos.x += shiftAmount;
+    }
+  });
+}
+
+// This method shifts a node to the left along with its entire branch
+function shiftBranchLeft(nodeId: string, shiftAmount: number, allNodes: ConversationNode[]): void {
+  const nodesToShift = [nodeId, ...getAllDescendants(nodeId, allNodes)];
+  
+  nodesToShift.forEach(id => {
+    const pos = lockedPositions.get(id);
+    if (pos) {
+      pos.x -= shiftAmount;
     }
   });
 }
@@ -324,9 +338,7 @@ function ConversationNodeComponent({ data, id }: NodeProps) {
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (window.confirm('Delete this node and all its children?')) {
-              onDelete(id);
-            }
+            onDelete(id);
           }}
           style={{
             position: 'absolute',
@@ -449,6 +461,8 @@ export function ConversationTreeChatbot() {
   const [examplePrompt, setExamplePrompt] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [nodeToDelete, setNodeToDelete] = useState<string | null>(null);
+  const [isGraphLocked, setIsGraphLocked] = useState(true);
 
   // Initialize ReactFlow instance
   const onInit = useCallback((instance: ReactFlowInstance) => {
@@ -500,7 +514,23 @@ export function ConversationTreeChatbot() {
   }, []);
 
   const onNodesChange = useCallback(
-    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    (changes: NodeChange[]) => {
+      // Update lockedPositions when nodes are dragged
+      changes.forEach(change => {
+        if (change.type === 'position' && change.position) {
+          // Node is being moved or has been moved
+          const nodeId = change.id;
+          const newPosition = change.position;
+          // Update the locked position (add nodeWidth/2 back since we subtract it in layoutNodes)
+          lockedPositions.set(nodeId, {
+            x: newPosition.x + nodeWidth / 2,
+            y: newPosition.y,
+          });
+        }
+      });
+      
+      setNodes((nds) => applyNodeChanges(changes, nds));
+    },
     []
   );
 
@@ -534,6 +564,26 @@ export function ConversationTreeChatbot() {
       const descendants = getAllDescendants(nodeId, prev.nodes);
       const idsToDelete = new Set([nodeId, ...descendants]);
       const remainingNodes = prev.nodes.filter(n => !idsToDelete.has(n.id));
+      
+      // Remove deleted nodes from lockedPositions
+      idsToDelete.forEach(id => {
+        lockedPositions.delete(id);
+      });
+      
+      // Clear all locked positions except the root node to force reorganization
+      const rootNode = remainingNodes.find(n => !n.parentId);
+      const rootId = rootNode?.id;
+      
+      // Store root position if it exists
+      const rootPosition = rootId ? lockedPositions.get(rootId) : null;
+      
+      // Clear all positions
+      lockedPositions.clear();
+      
+      // Restore root position if it existed
+      if (rootId && rootPosition) {
+        lockedPositions.set(rootId, rootPosition);
+      }
       
       let newActiveNodeId = prev.activeNodeId;
       if (idsToDelete.has(prev.activeNodeId || '')) {
@@ -570,7 +620,7 @@ export function ConversationTreeChatbot() {
           ...node.data,
           isDarkMode,
           isHighlighted,
-          onDelete: handleDeleteNode,
+          onDelete: setNodeToDelete,
           onMouseEnter: (nodeId: string) => setHoveredNodeId(nodeId),
           onMouseLeave: () => setHoveredNodeId(null),
           isHovered: hoveredNodeId === node.id,
@@ -579,7 +629,7 @@ export function ConversationTreeChatbot() {
     });
     setNodes(nodesWithTheme);
     setEdges(layoutedEdges);
-  }, [treeData, isDarkMode, searchQuery, matchesSearch, handleDeleteNode, hoveredNodeId]);
+  }, [treeData, isDarkMode, searchQuery, matchesSearch, hoveredNodeId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -725,6 +775,14 @@ export function ConversationTreeChatbot() {
           });
         } else {
           clearInterval(streamInterval);
+          
+          // Transfer the locked position from tempNodeId to actual nodeId
+          const tempPosition = lockedPositions.get(tempNodeId);
+          if (tempPosition) {
+            lockedPositions.set(nodeId, tempPosition);
+            lockedPositions.delete(tempNodeId);
+          }
+          
           setTreeData((prev) => ({
             ...prev,
             nodes: prev.nodes.map(node =>
@@ -1282,17 +1340,16 @@ export function ConversationTreeChatbot() {
       backgroundColor: theme.containerBg,
       fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif',
     }}>
-      {/* Top Bar */}
+      {/* Theme Toggle Switch - Top Right */}
       <div style={{
         position: 'absolute',
         top: '12px',
-        right: '12px',
+        right: '60px',
         display: 'flex',
         gap: '12px',
         alignItems: 'center',
             zIndex: 50,
       }}>
-        {/* Theme Toggle Switch */}
       {!isRightMinimized && (
           <div style={{
             display: 'flex',
@@ -1335,35 +1392,6 @@ export function ConversationTreeChatbot() {
         </button>
           </div>
         )}
-        {/* Analytics Button */}
-        <button
-          onClick={() => setShowAnalytics(true)}
-          style={{
-            padding: '8px 16px',
-            fontSize: '14px',
-            fontWeight: 500,
-            border: `1px solid ${theme.buttonBorder}`,
-            backgroundColor: theme.buttonBg,
-            color: theme.buttonText,
-            borderRadius: '20px',
-            cursor: 'pointer',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-            transition: 'all 0.2s',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = theme.hoverBg;
-            e.currentTarget.style.transform = 'translateY(-1px)';
-            e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = theme.buttonBg;
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
-          }}
-          title="View Token Analytics"
-        >
-          📊 Analytics
-        </button>
       </div>
 
       {/* Left Side: Chatbot */}
@@ -1377,91 +1405,128 @@ export function ConversationTreeChatbot() {
           position: 'relative',
         }}
       >
-        {/* How It Works Button */}
-        <button
-          onClick={() => setShowHowItWorks(true)}
-          style={{
-            position: 'absolute',
-            top: '10px',
-            left: '10px',
-            padding: '8px 14px',
-            fontSize: '14px',
-            fontWeight: 500,
-            border: `1px solid ${theme.inputBorder}`,
-            backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)',
-            color: theme.messageText,
-            borderRadius: '8px',
-            cursor: 'pointer',
-            zIndex: 10,
-            transition: 'all 0.2s ease',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = theme.hoverBg;
-            e.currentTarget.style.transform = 'translateY(-1px)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)';
-            e.currentTarget.style.transform = 'translateY(0)';
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10"></circle>
-            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-            <line x1="12" y1="17" x2="12.01" y2="17"></line>
-          </svg>
-          How It Works
-        </button>
-
-        {/* Minimize Button */}
-        <button
-          onClick={() => setIsLeftMinimized(true)}
-          style={{
-            position: 'absolute',
-            top: '10px',
-            right: '10px',
-            width: '28px',
-            height: '28px',
-            padding: '0',
-            fontSize: '16px',
-            fontWeight: 600,
-            border: `1px solid ${theme.buttonBorder}`,
-            backgroundColor: theme.buttonBg,
-            color: theme.buttonText,
-            borderRadius: '6px',
-            cursor: 'pointer',
-            zIndex: 10,
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          −
-        </button>
-
-        {/* Divider line under How It Works button */}
+        {/* Top Bar with Buttons - Non-transparent */}
         <div
           style={{
             position: 'absolute',
-            top: '50px',
+            top: 0,
             left: 0,
             right: 0,
-            height: '2px',
-            backgroundColor: theme.divider,
-            zIndex: 5,
-            boxShadow: `0 1px 2px ${theme.divider}40`,
+            height: '50px',
+            backgroundColor: theme.chatBg,
+            borderBottom: `1px solid ${theme.divider}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 10px',
+            zIndex: 10,
+            backdropFilter: 'blur(10px)',
           }}
-        />
+        >
+          {/* Left side buttons group */}
+          <div style={{
+            display: 'flex',
+            gap: '8px',
+            alignItems: 'center',
+          }}>
+            {/* How It Works Button */}
+            <button
+              onClick={() => setShowHowItWorks(true)}
+              style={{
+                padding: '8px 14px',
+                fontSize: '14px',
+                fontWeight: 500,
+                border: `1px solid ${theme.inputBorder}`,
+                backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)',
+                color: theme.messageText,
+                borderRadius: '8px',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme.hoverBg;
+                e.currentTarget.style.transform = 'translateY(-1px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+              How It Works
+            </button>
+
+            {/* Analytics Button */}
+            <button
+              onClick={() => setShowAnalytics(true)}
+              style={{
+                padding: '8px 14px',
+                fontSize: '14px',
+                fontWeight: 500,
+                border: `1px solid ${theme.buttonBorder}`,
+                backgroundColor: theme.buttonBg,
+                color: theme.buttonText,
+                borderRadius: '8px',
+                cursor: 'pointer',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme.hoverBg;
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = theme.buttonBg;
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+              }}
+              title="View Token Analytics"
+            >
+              📊 Analytics
+            </button>
+          </div>
+
+          {/* Minimize Button */}
+          <button
+            onClick={() => setIsLeftMinimized(true)}
+            style={{
+              width: '28px',
+              height: '28px',
+              padding: '0',
+              fontSize: '16px',
+              fontWeight: 600,
+              border: `1px solid ${theme.buttonBorder}`,
+              backgroundColor: theme.buttonBg,
+              color: theme.buttonText,
+              borderRadius: '6px',
+              cursor: 'pointer',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            −
+          </button>
+        </div>
 
         <div
           style={{
             flex: 1,
             padding: '24px',
-            paddingTop: '80px',
+            paddingTop: '74px',
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
@@ -1677,8 +1742,55 @@ export function ConversationTreeChatbot() {
                             <span>{node.response}</span>
                 </div>
                         ) : (
-                          <span>
-                            {streamingResponses.get(node.id) || node.response}
+                          <div style={{ position: 'relative' }}>
+                            <ReactMarkdown
+                              components={{
+                                p: ({children}) => <p style={{ margin: '0.5em 0', lineHeight: '1.6' }}>{children}</p>,
+                                h1: ({children}) => <h1 style={{ fontSize: '1.4em', fontWeight: 600, margin: '0.6em 0 0.3em 0' }}>{children}</h1>,
+                                h2: ({children}) => <h2 style={{ fontSize: '1.2em', fontWeight: 600, margin: '0.5em 0 0.3em 0' }}>{children}</h2>,
+                                h3: ({children}) => <h3 style={{ fontSize: '1.1em', fontWeight: 600, margin: '0.4em 0 0.2em 0' }}>{children}</h3>,
+                                code: ({node, inline, className, children, ...props}: any) => (
+                                  <code style={{
+                                    backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)',
+                                    padding: inline ? '2px 6px' : '10px 12px',
+                                    borderRadius: '4px',
+                                    fontFamily: 'monospace',
+                                    fontSize: '0.9em',
+                                    display: inline ? 'inline' : 'block',
+                                    margin: inline ? '0' : '0.5em 0',
+                                    overflowX: 'auto',
+                                  }} {...props}>
+                                    {children}
+                                  </code>
+                                ),
+                                ul: ({children}) => <ul style={{ margin: '0.5em 0', paddingLeft: '1.5em', listStyleType: 'disc' }}>{children}</ul>,
+                                ol: ({children}) => <ol style={{ margin: '0.5em 0', paddingLeft: '1.5em', listStyleType: 'decimal' }}>{children}</ol>,
+                                li: ({children}) => <li style={{ margin: '0.2em 0' }}>{children}</li>,
+                                blockquote: ({children}) => (
+                                  <blockquote style={{
+                                    borderLeft: `3px solid ${theme.accent}`,
+                                    paddingLeft: '1em',
+                                    margin: '0.5em 0',
+                                    fontStyle: 'italic',
+                                    opacity: 0.9,
+                                  }}>
+                                    {children}
+                                  </blockquote>
+                                ),
+                                a: ({href, children}) => (
+                                  <a href={href} target="_blank" rel="noopener noreferrer" style={{
+                                    color: theme.accent,
+                                    textDecoration: 'underline',
+                                  }}>
+                                    {children}
+                                  </a>
+                                ),
+                                strong: ({children}) => <strong style={{ fontWeight: 600 }}>{children}</strong>,
+                                em: ({children}) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
+                              }}
+                            >
+                              {streamingResponses.get(node.id) || node.response}
+                            </ReactMarkdown>
                             {(streamingResponses.has(node.id) || (node.response === 'Thinking...' && streamingResponses.size > 0)) && (
                               <span style={{
                                 display: 'inline-block',
@@ -1690,7 +1802,7 @@ export function ConversationTreeChatbot() {
                                 verticalAlign: 'middle',
                               }} />
                             )}
-                          </span>
+                          </div>
                         )}
               </div>
                       <div style={{
@@ -1762,7 +1874,7 @@ export function ConversationTreeChatbot() {
                   container.style.transform = 'scale(1)';
                 }
               }}
-              placeholder={treeData.nodes.length === 0 ? "Ask Arnav" : "Type a message..."}
+              placeholder={treeData.nodes.length === 0 ? "Type your message..." : "Type a message..."}
               rows={1}
               style={{
                 flex: 1,
@@ -1895,7 +2007,7 @@ export function ConversationTreeChatbot() {
           onClick={() => setIsLeftMinimized(false)}
           style={{
             position: 'absolute',
-            top: '10px',
+            top: '60px',
             left: '10px',
             width: '28px',
             height: '28px',
@@ -1930,17 +2042,13 @@ export function ConversationTreeChatbot() {
           backdropFilter: 'blur(20px)',
         }}
       >
-        {/* Controls in top right */}
+        {/* Minimize Button - top right */}
         <div style={{
           position: 'absolute',
           top: '10px',
           right: '10px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
           zIndex: 15,
         }}>
-        {/* Minimize Button */}
         <button
           onClick={() => setIsRightMinimized(true)}
           style={{
@@ -2078,13 +2186,40 @@ export function ConversationTreeChatbot() {
           minZoom={0.2}
           maxZoom={1.5}
           panOnScroll={true}
+          panOnDrag={false}
+          zoomOnScroll={true}
+          zoomOnPinch={true}
+          zoomOnDoubleClick={true}
           selectionOnDrag={false}
+          nodesDraggable={!isGraphLocked}
+          nodesConnectable={false}
         >
           <Background 
             color={isDarkMode ? "#2a4569" : "#b3d9ff"} 
             gap={16} 
           />
-          <Controls />
+          <Controls showInteractive={false}>
+            <ControlButton 
+              onClick={() => setIsGraphLocked(!isGraphLocked)}
+              title={isGraphLocked ? 'Locked: Nodes cannot be moved. Click to unlock.' : 'Unlocked: Nodes can be dragged. Click to lock.'}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                width="16"
+                height="16"
+              >
+                {isGraphLocked ? (
+                  // Locked icon
+                  <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+                ) : (
+                  // Unlocked icon
+                  <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6h1.9c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+                )}
+              </svg>
+            </ControlButton>
+          </Controls>
           <MiniMap
             nodeColor={(node) => {
               if (node.data.isHighlighted) return isDarkMode ? '#60a5fa' : '#007aff';
@@ -2125,6 +2260,125 @@ export function ConversationTreeChatbot() {
         >
           +
         </button>
+      )}
+
+      {/* Custom Delete Confirmation Modal */}
+      {nodeToDelete && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            backdropFilter: 'blur(4px)',
+          }}
+          onClick={() => setNodeToDelete(null)}
+        >
+          <div
+            style={{
+              backgroundColor: theme.chatBg,
+              borderRadius: '16px',
+              padding: '32px',
+              maxWidth: '400px',
+              width: '90%',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.4)',
+              border: `1px solid ${theme.divider}`,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{
+              marginBottom: '24px',
+            }}>
+              <div style={{
+                fontSize: '24px',
+                fontWeight: 600,
+                color: theme.messageText,
+                marginBottom: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+              }}>
+                <span style={{
+                  fontSize: '32px',
+                }}>⚠️</span>
+                Delete Node?
+              </div>
+              <p style={{
+                margin: 0,
+                fontSize: '16px',
+                lineHeight: '1.6',
+                color: theme.secondaryText,
+              }}>
+                Are you sure you want to delete this node and all its children? This action cannot be undone.
+              </p>
+            </div>
+
+            <div style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+            }}>
+              <button
+                onClick={() => setNodeToDelete(null)}
+                style={{
+                  padding: '12px 24px',
+                  fontSize: '15px',
+                  fontWeight: 500,
+                  border: `1px solid ${theme.inputBorder}`,
+                  backgroundColor: theme.buttonBg,
+                  color: theme.buttonText,
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = theme.hoverBg;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = theme.buttonBg;
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  handleDeleteNode(nodeToDelete);
+                  setNodeToDelete(null);
+                }}
+                style={{
+                  padding: '12px 24px',
+                  fontSize: '15px',
+                  fontWeight: 500,
+                  border: 'none',
+                  backgroundColor: '#ef4444',
+                  color: '#ffffff',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#dc2626';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 6px 16px rgba(239, 68, 68, 0.4)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#ef4444';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(239, 68, 68, 0.3)';
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
