@@ -638,7 +638,7 @@ export function ConversationTreeChatbot() {
   const examplePrompts = [
     "What is a neural network?",
     "I want to learn about machine learning",
-    "I am curious about how AI works?",
+    "What is AI?",
     "What is deep learning?",
     "What is natural language processing?",
     "I want to understand transformers",
