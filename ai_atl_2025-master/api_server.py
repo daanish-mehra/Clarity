@@ -8,8 +8,13 @@ from gemini_image_context_chat import GeminiImageContextChat, ImageContextStorag
 from PIL import Image
 import base64
 from io import BytesIO
+from datetime import datetime
 
 app = FastAPI(title="Gemini Image Context Chat API")
+
+# Create context images directory if it doesn't exist
+CONTEXT_IMAGES_DIR = "context_images"
+os.makedirs(CONTEXT_IMAGES_DIR, exist_ok=True)
 
 app.add_middleware(
     CORSMiddleware,
@@ -97,7 +102,7 @@ def get_path_context(node_path: List[str], all_nodes: List[NodePath]) -> List[Di
     return messages
 
 
-def send_message_with_context(chat: GeminiImageContextChat, context_messages: List[Dict[str, str]], user_message: str) -> Tuple[str, Optional[Image.Image], dict]:
+def send_message_with_context(chat: GeminiImageContextChat, context_messages: List[Dict[str, str]], user_message: str, session_id: str = "default", node_id: str = None) -> Tuple[str, Optional[Image.Image], dict]:
     image_storage = ImageContextStorage()
     
     context_image = None
@@ -106,87 +111,79 @@ def send_message_with_context(chat: GeminiImageContextChat, context_messages: Li
     text_equivalent_tokens = 0
     
     if context_messages:
+        # Create context image from entire chat history (all messages in context_messages)
+        # The image will contain all previous messages at 768px width, height scales as needed
         context_image = image_storage.messages_to_image(context_messages)
-        vision_tokens = chat.estimate_vision_tokens(context_image)
         
-        # Calculate what the full prompt would cost with text context
-        # This simulates what we'd send if using text method: all context messages formatted + new user message
-        # Format: "User: message1\nAssistant: response1\nUser: message2\n..."
-        text_context_parts = []
-        for msg in context_messages:
-            role = msg['role'].capitalize()
-            content = msg['content']
-            text_context_parts.append(f"{role}: {content}")
-        text_context_format = "\n".join(text_context_parts)
-        text_context_prompt = f"{text_context_format}\nUser: {user_message}"
+        # Save context image to disk
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Include milliseconds
+        if node_id:
+            image_filename = f"context_{session_id}_{node_id}_{timestamp}.png"
+        else:
+            image_filename = f"context_{session_id}_{timestamp}.png"
+        image_path = os.path.join(CONTEXT_IMAGES_DIR, image_filename)
+        context_image.save(image_path)
+        print(f"Context image saved: {image_path}")
         
-        # Estimate tokens for the full text-based prompt
-        # This includes all context messages + the new user message
-        text_equivalent_with_prompt = chat.estimate_text_tokens(text_context_prompt)
+        # Estimate vision tokens for the context image
+        # Formula: ceil(height / 768) * 258 tokens for 768px width image
+        # IMPORTANT: Each API call sends a NEW image to Gemini, so we count vision tokens for THIS call.
+        # Even though the image contains all context, Gemini charges tokens for each image sent in each API call.
+        vision_tokens = chat.estimate_vision_tokens(context_image, verbose=True)
+        print(f"[Token Calculation] Image: {context_image.width}x{context_image.height}px = {vision_tokens} vision tokens")
         
-        # Also calculate context-only equivalent for display purposes
-        text_chars = sum(len(msg['content']) for msg in context_messages)
-        role_overhead = len(context_messages) * 15
-        text_equivalent_tokens = (text_chars + role_overhead) // 4
+        # Calculate Text Equivalent: total characters in ENTIRE chat history (context + user message) / 4
+        # This represents what it would cost to send all messages as text
+        context_text_chars = sum(len(msg['content']) for msg in context_messages)
+        user_message_chars = len(user_message)
+        total_text_chars = context_text_chars + user_message_chars
+        text_equivalent_total = total_text_chars // 4
+        print(f"[Token Calculation] Text Equivalent: {total_text_chars} chars / 4 = {text_equivalent_total} tokens")
         
-        # Minimal prompt for image context
+        # Prompt text for image method (matches the format used in gemini_image_context_chat.py)
+        # NOTE: The prompt_parts list contains: [text_string, image, text_string]
+        # Gemini will count: vision tokens for the image + text tokens for the text strings
+        prompt_text = f"Here is our conversation history as an image:\nUser's new message: {user_message}\n\nPlease respond naturally based on the conversation history shown in the image."
         prompt_parts = [
+            "Here is our conversation history as an image:",
             context_image,
-            f"Continue the conversation. User: {user_message}"
+            f"\nUser's new message: {user_message}\n\nPlease respond naturally based on the conversation history shown in the image."
         ]
-        prompt_text = f"Continue the conversation. User: {user_message}"
     else:
+        # First message, no context
+        context_image = None
+        vision_tokens = 0
         prompt_parts = [user_message]
         prompt_text = user_message
-        text_equivalent_tokens = 0
-        text_equivalent_with_prompt = 0
+        # Text Equivalent for first message is just the user message
+        text_equivalent_total = len(user_message) // 4
     
-    # Calculate text tokens for the image method prompt
+    # Calculate prompt text tokens for image method
+    # This counts ONLY the text prompt, NOT the image (image is counted separately as vision_tokens)
     text_tokens = chat.estimate_text_tokens(prompt_text)
+    print(f"[Token Calculation] Prompt text tokens: {text_tokens} tokens")
+    print(f"[Token Calculation] Total for this API call: {vision_tokens} vision + {text_tokens} text = {vision_tokens + text_tokens} tokens")
     
     response = chat.model.generate_content(prompt_parts)
     response_text = response.text
     
-    # Calculate savings based on context comparison
-    # For very short conversations, images might cost more, so we use context-only comparison
-    # This provides a more accurate representation of the savings from image compression
+    # Calculate token savings: Text Equivalent - (Vision Tokens + Prompt Text Tokens)
+    # Formula: Token Savings = Text Equivalent - (Vision Tokens + Prompt Text Tokens)
+    # This compares:
+    #   - Text method: Send all messages as text = text_equivalent_total tokens
+    #   - Image method: Send context as image + prompt text = vision_tokens + text_tokens
     if context_messages:
-        # Calculate what we would have spent sending context as text (context only)
-        context_text_cost = text_equivalent_tokens
-        
-        # Calculate what we spent sending context as image
-        context_image_cost = vision_tokens
-        
-        # The savings from using images for context storage
-        # This is the core benefit: compressing text context into an image
-        context_savings = context_text_cost - context_image_cost
-        
-        # For the full comparison (including prompt), calculate total savings
-        total_text_cost = text_equivalent_with_prompt
-        total_image_cost = vision_tokens + text_tokens
-        total_savings = total_text_cost - total_image_cost
-        
-        # For very short conversations where images cost more overall,
-        # we still want to show the benefit of image compression on context
-        # So we use context_savings if total_savings is negative
-        if total_savings < 0 and context_savings > 0:
-            # Short conversation: show savings from context compression only
-            actual_savings = context_savings
-        elif total_savings >= 0:
-            # Normal case: show total savings
-            actual_savings = total_savings
-        else:
-            # Edge case: both are negative (shouldn't happen), show 0
-            actual_savings = 0
+        token_savings = text_equivalent_total - (vision_tokens + text_tokens)
+        print(f"[Token Calculation] Savings: {text_equivalent_total} - ({vision_tokens} + {text_tokens}) = {token_savings} tokens")
     else:
-        # No context (first message), so no savings
-        actual_savings = 0
+        # No savings on first message (no context to compress)
+        token_savings = 0
     
     return response_text, context_image, {
         'vision_tokens': vision_tokens,
         'text_tokens': text_tokens,
-        'text_equivalent_tokens': text_equivalent_with_prompt if context_messages else text_tokens,
-        'token_savings': actual_savings
+        'text_equivalent_tokens': text_equivalent_total,
+        'token_savings': token_savings
     }
 
 
@@ -213,8 +210,11 @@ async def send_message(request: MessageRequest):
         
         context_messages = get_path_context(node_path, tree.nodes)
         
+        import time
+        node_id = str(int(time.time() * 1000))
+        
         response_text, context_image, token_data = send_message_with_context(
-            chat, context_messages, request.user_message
+            chat, context_messages, request.user_message, session_id=request.session_id, node_id=node_id
         )
         
         context_image_base64 = None
@@ -222,9 +222,6 @@ async def send_message(request: MessageRequest):
             buffered = BytesIO()
             context_image.save(buffered, format="PNG")
             context_image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        
-        import time
-        node_id = str(int(time.time() * 1000))
         
         call_stats = {
             'node_id': node_id,
@@ -253,8 +250,121 @@ async def send_message(request: MessageRequest):
         raise HTTPException(status_code=500, detail=f"{str(e)}\n{traceback.format_exc()}")
 
 
+class StatsRequest(BaseModel):
+    session_id: str
+    tree: ConversationTree
+    active_node_path: Optional[List[str]] = None  # List of node IDs from root to active node
+
+
+@app.post("/api/stats/calculate", response_model=TokenStatsResponse)
+async def calculate_token_stats(request: StatsRequest):
+    """
+    Calculate token statistics based on the active conversation branch.
+    
+    This creates ONE image of the entire active branch and calculates:
+    - Vision tokens: Based on the single context image (ceil(height/768) * 258)
+    - Text tokens: Based on all messages in the active branch (total chars / 4)
+    - Token savings: Text equivalent - (Vision tokens + Prompt tokens)
+    """
+    session_id = request.session_id
+    tree = request.tree
+    active_node_path = request.active_node_path or []
+    
+    # Get the active branch context (all messages in the active path)
+    if active_node_path:
+        context_messages = get_path_context(active_node_path, tree.nodes)
+    else:
+        # If no active path, use the longest branch (root to deepest leaf)
+        node_map = {node.node_id: node for node in tree.nodes}
+        root_nodes = [node for node in tree.nodes if not node.parent_id]
+        
+        def find_longest_path(current_id: str, path: List[str]) -> List[str]:
+            if current_id not in node_map:
+                return path
+            current_path = path + [current_id]
+            children = [node for node in tree.nodes if node.parent_id == current_id]
+            if not children:
+                return current_path
+            longest = current_path
+            for child in children:
+                child_path = find_longest_path(child.node_id, current_path)
+                if len(child_path) > len(longest):
+                    longest = child_path
+            return longest
+        
+        longest_path = []
+        for root in root_nodes:
+            path = find_longest_path(root.node_id, [])
+            if len(path) > len(longest_path):
+                longest_path = path
+        
+        context_messages = get_path_context(longest_path, tree.nodes) if longest_path else []
+    
+    # Get or create chat session for token estimation
+    chat = get_or_create_session(session_id)
+    image_storage = ImageContextStorage()
+    
+    # Calculate tokens based on the active branch
+    if context_messages:
+        # Create ONE image of the entire active branch
+        context_image = image_storage.messages_to_image(context_messages)
+        
+        # Save the context image for this stats calculation
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        image_filename = f"stats_context_{session_id}_{timestamp}.png"
+        image_path = os.path.join(CONTEXT_IMAGES_DIR, image_filename)
+        context_image.save(image_path)
+        print(f"[Stats Calculation] Context image saved: {image_path}")
+        
+        # Calculate vision tokens for this single image
+        # Formula: ceil(height / 768) * 258 tokens
+        vision_tokens = chat.estimate_vision_tokens(context_image, verbose=True)
+        print(f"[Stats Calculation] Active branch image: {context_image.width}x{context_image.height}px = {vision_tokens} vision tokens")
+        
+        # Calculate text equivalent: total characters in active branch / 4
+        total_text_chars = sum(len(msg['content']) for msg in context_messages)
+        text_equivalent_total = total_text_chars // 4
+        print(f"[Stats Calculation] Active branch text: {total_text_chars} chars / 4 = {text_equivalent_total} tokens")
+        
+        # For stats display, we don't need prompt tokens (no new user message)
+        # But if we want to show savings, we can estimate based on a typical prompt
+        # For now, set to 0 since we're just showing the context cost
+        prompt_text_tokens = 0
+        
+        # Token savings: Text equivalent - Vision tokens (no prompt for stats)
+        token_savings = text_equivalent_total - vision_tokens
+        
+        # Count API calls in the active branch (each call = user + model message)
+        api_calls_count = len(context_messages) // 2
+    else:
+        vision_tokens = 0
+        text_equivalent_total = 0
+        prompt_text_tokens = 0
+        token_savings = 0
+        api_calls_count = 0
+        context_image = None
+    
+    return TokenStatsResponse(
+        session_id=session_id,
+        total_api_calls=api_calls_count,
+        total_vision_tokens=vision_tokens,
+        total_text_tokens=prompt_text_tokens,
+        total_text_equivalent_tokens=text_equivalent_total,
+        total_token_savings=token_savings,
+        average_savings_per_call=token_savings / api_calls_count if api_calls_count > 0 else 0,
+        calls=[]  # Don't return individual call stats for branch-based calculation
+    )
+
+
 @app.get("/api/stats/{session_id}", response_model=TokenStatsResponse)
 async def get_token_stats(session_id: str):
+    """
+    Get token statistics for a session (legacy endpoint - sums up individual call stats).
+    
+    Note: This endpoint sums up tokens from individual API calls, which may not reflect
+    the actual tokens used for the active conversation branch. Use /api/stats/calculate
+    with the active branch path for accurate calculations based on the current context.
+    """
     if session_id not in token_stats:
         return TokenStatsResponse(
             session_id=session_id,
@@ -267,6 +377,7 @@ async def get_token_stats(session_id: str):
             calls=[]
         )
     
+    # Sum up tokens from individual API calls (legacy behavior)
     stats = token_stats[session_id]
     total_vision = sum(s['vision_tokens'] for s in stats)
     total_text = sum(s['text_tokens'] for s in stats)

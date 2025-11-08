@@ -23,13 +23,24 @@ interface TokenStats {
   }>;
 }
 
+interface ConversationNode {
+  id: string;
+  parentId: string | null;
+  prompt: string;
+  response: string;
+  timestamp: Date | string;
+  branchLabel?: string;
+}
+
 interface TokenAnalyticsProps {
   sessionId?: string;
+  tree?: { nodes: ConversationNode[] };
+  activeNodeId?: string | null;
   isDarkMode?: boolean;
   onClose?: () => void;
 }
 
-export function TokenAnalytics({ sessionId = 'default', isDarkMode = false, onClose }: TokenAnalyticsProps) {
+export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDarkMode = false, onClose }: TokenAnalyticsProps) {
   const [stats, setStats] = useState<TokenStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,15 +54,66 @@ export function TokenAnalytics({ sessionId = 'default', isDarkMode = false, onCl
   const [isVisible, setIsVisible] = useState(false);
   const [hasAnimated, setHasAnimated] = useState(false);
 
+  // Helper function to get path from root to active node
+  const getActiveNodePath = (): string[] => {
+    if (!tree || !activeNodeId) return [];
+    
+    const nodeMap = new Map(tree.nodes.map(n => [n.id, n]));
+    const path: string[] = [];
+    let currentId: string | null = activeNodeId;
+    
+    // Build path from active node to root
+    while (currentId) {
+      path.unshift(currentId); // Add to beginning
+      const node = nodeMap.get(currentId);
+      currentId = node?.parentId || null;
+    }
+    
+    return path;
+  };
+
   const fetchStats = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/api/stats/${sessionId}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch stats');
+      // If we have tree and active node, use the new calculate endpoint
+      if (tree && activeNodeId) {
+        const activeNodePath = getActiveNodePath();
+        const response = await fetch('http://localhost:8000/api/stats/calculate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            session_id: sessionId,
+            tree: {
+              session_id: sessionId,
+              nodes: tree.nodes.map(node => ({
+                node_id: node.id,
+                parent_id: node.parentId,
+                prompt: node.prompt,
+                response: node.response,
+                timestamp: typeof node.timestamp === 'string' ? node.timestamp : node.timestamp.toISOString(),
+              })),
+            },
+            active_node_path: activeNodePath,
+          }),
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch stats');
+        }
+        const data = await response.json();
+        setStats(data);
+        setError(null);
+      } else {
+        // Fallback to old endpoint if no tree/active node
+        const response = await fetch(`http://localhost:8000/api/stats/${sessionId}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch stats');
+        }
+        const data = await response.json();
+        setStats(data);
+        setError(null);
       }
-      const data = await response.json();
-      setStats(data);
-      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load statistics');
     } finally {
@@ -141,7 +203,7 @@ export function TokenAnalytics({ sessionId = 'default', isDarkMode = false, onCl
     return () => {
       clearInterval(interval);
     };
-  }, [sessionId]);
+  }, [sessionId, tree, activeNodeId]);
 
   const theme = isDarkMode ? {
     bg: '#0a1220', // Dark blue background

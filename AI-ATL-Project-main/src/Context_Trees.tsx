@@ -894,6 +894,8 @@ export function ConversationTreeChatbot() {
   return (
       <TokenAnalytics
         sessionId="default"
+        tree={treeData}
+        activeNodeId={treeData.activeNodeId}
         isDarkMode={isDarkMode}
         onClose={() => setShowAnalytics(false)}
       />

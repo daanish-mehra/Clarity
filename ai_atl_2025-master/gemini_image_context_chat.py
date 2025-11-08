@@ -223,29 +223,42 @@ class GeminiImageContextChat:
         vision_tokens = 0
         text_tokens_for_context = 0
         prompt_text_tokens = 0
+        user_message_tokens = 0
+        text_equivalent_total = 0
+        token_savings = 0
         
         # Prepare the prompt with context image
         if len(self.conversation_history) > 0:
-            # Create context image from previous messages only (before adding new user message)
-            # This avoids duplicating the current user message
+            # Create context image from entire chat history (all messages in conversation_history)
+            # The image will contain all previous messages at 768px width, height scales as needed
             previous_context_image = self.image_storage.messages_to_image(
                 self.conversation_history
             )
             
+            # Estimate vision tokens for the context image
+            # Formula: ceil(height / 768) * 258 tokens for 768px width image
+            vision_tokens = self.estimate_vision_tokens(previous_context_image, verbose=True)
+            
             # Add user message to history (for future context)
             self.add_message('user', user_message)
             
-            # Estimate vision tokens for the previous context
-            vision_tokens = self.estimate_vision_tokens(previous_context_image, verbose=True)
+            # Calculate Text Equivalent: total characters in ENTIRE chat history (including new user message) / 4
+            # This represents what it would cost to send all messages as text
+            total_text_chars = sum(len(msg['content']) for msg in self.conversation_history)
+            text_equivalent_total = total_text_chars // 4
             
-            # Estimate text tokens if we sent all previous conversation history as text instead
-            previous_text_chars = sum(len(msg['content']) for msg in self.conversation_history[:-1])
-            # Add overhead for role markers and formatting (e.g., [USER], [MODEL])
-            overhead = max(0, len(self.conversation_history) - 1) * 10
-            text_tokens_for_context = (previous_text_chars + overhead) // 4
+            # Calculate text tokens for context image only (for display purposes)
+            context_text_chars = sum(len(msg['content']) for msg in self.conversation_history[:-1])  # Exclude the user message we just added
+            text_tokens_for_context = context_text_chars // 4
+            user_message_tokens = len(user_message) // 4
             
+            # Prompt text includes wrapper text + user message for image method
             prompt_text = "Here is our conversation history as an image:\nUser's new message: {}\n\nPlease respond naturally based on the conversation history shown in the image.".format(user_message)
             prompt_text_tokens = self.estimate_text_tokens(prompt_text)
+            
+            # Calculate token savings: Text Equivalent - (Vision Tokens + Prompt Text Tokens)
+            # Formula: Token Savings = Text Equivalent - (Vision Tokens + Prompt Text Tokens)
+            token_savings = text_equivalent_total - (vision_tokens + prompt_text_tokens)
             
             prompt_parts = [
                 "Here is our conversation history as an image:",
@@ -277,10 +290,34 @@ class GeminiImageContextChat:
         print(f"Vision tokens (context image): {vision_tokens}")
         print(f"Text tokens (prompt text): {prompt_text_tokens}")
         print(f"Total tokens for API call: {vision_tokens + prompt_text_tokens}")
-        if text_tokens_for_context > 0:
-            # For text equivalent, we'd send all messages as text (no separate prompt needed)
-            print(f"Equivalent text tokens (if sent as text): {text_tokens_for_context}")
-            print(f"Token savings: {text_tokens_for_context - (vision_tokens + prompt_text_tokens)} tokens")
+        if text_tokens_for_context >= 0:  # Changed condition to show even for first message
+            # Show breakdown for clarity
+            if text_tokens_for_context > 0:
+                print(f"\nText Equivalent Breakdown:")
+                print(f"  Previous messages as text: {text_tokens_for_context} tokens")
+                print(f"  New user message as text: {user_message_tokens} tokens")
+                print(f"  Total text equivalent: {text_equivalent_total} tokens")
+            else:
+                # First message case
+                text_equivalent_total = user_message_tokens
+                token_savings = 0  # No savings on first message
+            
+            if text_equivalent_total > 0:
+                print(f"\nToken Savings Calculation:")
+                print(f"  Formula: Token Savings = Text Equivalent - (Vision Tokens + Prompt Text Tokens)")
+                print(f"  Text Equivalent: {text_equivalent_total} tokens")
+                print(f"  Vision Tokens: {vision_tokens} tokens")
+                print(f"  Prompt Text Tokens: {prompt_text_tokens} tokens")
+                calculated_savings = text_equivalent_total - (vision_tokens + prompt_text_tokens)
+                print(f"  Calculation: {text_equivalent_total} - ({vision_tokens} + {prompt_text_tokens})")
+                print(f"  Calculation: {text_equivalent_total} - {vision_tokens + prompt_text_tokens} = {calculated_savings}")
+                print(f"  Token Savings: {token_savings} tokens")
+                
+                # Verify the calculation matches
+                if token_savings != calculated_savings:
+                    print(f"  ⚠️  WARNING: Mismatch! token_savings ({token_savings}) != calculated ({calculated_savings})")
+                else:
+                    print(f"  ✓ Verified: Token Savings = {token_savings} tokens")
         print("----------------------------\n")
         
         # Generate response
@@ -307,14 +344,15 @@ class GeminiImageContextChat:
     
     def estimate_vision_tokens(self, image: Image.Image, verbose: bool = False) -> int:
         """
-        Calculate Gemini 2.0+ image tokens using tile-based formula.
+        Calculate vision tokens for a 768px width image.
         
-        For Gemini 2.0+:
-        - Images <= 384x384: 258 tokens
-        - Larger images: Divided into 768x768 tiles, each tile costs 258 tokens
+        Formula:
+        - Image width is fixed at 768px
+        - Each 768px unit of height adds 258 vision tokens
+        - Calculation: ceil(height / 768) * 258
         
         Args:
-            image: PIL Image to estimate tokens for
+            image: PIL Image to estimate tokens for (should be 768px wide)
             verbose: If True, print detailed calculation information
             
         Returns:
@@ -326,23 +364,17 @@ class GeminiImageContextChat:
         width = image.width
         height = image.height
         
-        # If image fits in a single small tile (<= 384x384), return 258 tokens
-        if width <= 384 and height <= 384:
-            if verbose:
-                print(f"  Image {width}x{height}: Fits in single 384x384 tile = 258 tokens")
-            return 258
-        
-        # Calculate tiles (768x768 each) using ceiling division
-        tiles_width = -(-width // 768)   # Ceiling division
-        tiles_height = -(-height // 768)
-        
-        total_tokens = tiles_width * tiles_height * 258
+        # Calculate tokens based on height: each 768px unit of height = 258 tokens
+        # Use ceiling division to round up
+        height_units = -(-height // 768)  # Ceiling division
+        total_tokens = height_units * 258
         
         if verbose:
             print(f"  Image {width}x{height}:")
-            print(f"    Tiles: {tiles_width} wide × {tiles_height} tall (768x768 each)")
-            print(f"    Calculation: {tiles_width} × {tiles_height} × 258 = {total_tokens} tokens")
-            print(f"    Note: Width {width}px fits in {tiles_width} tile(s), height {height}px fits in {tiles_height} tile(s)")
+            print(f"    Width: {width}px (fixed at 768px)")
+            print(f"    Height: {height}px")
+            print(f"    Height units (768px each): {height_units}")
+            print(f"    Calculation: {height_units} × 258 = {total_tokens} tokens")
         
         return total_tokens
     
@@ -361,17 +393,15 @@ class GeminiImageContextChat:
     
     def estimate_context_text_tokens(self) -> int:
         """
-        Estimate total text tokens that would be used if conversation history
-        were sent as text instead of an image.
+        Estimate total text tokens for entire chat history.
+        
+        Formula: total characters in entire chat history / 4
         
         Returns:
             Estimated number of text tokens for full conversation history
         """
         total_chars = sum(len(msg['content']) for msg in self.conversation_history)
-        # Add overhead for role markers and formatting
-        # Each message has [ROLE] header and spacing
-        overhead = len(self.conversation_history) * 10  # Rough estimate
-        return (total_chars + overhead) // 4
+        return total_chars // 4
     
     def get_context_stats(self) -> Dict[str, int]:
         """
