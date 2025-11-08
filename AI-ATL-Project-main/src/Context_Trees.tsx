@@ -636,14 +636,14 @@ export function ConversationTreeChatbot() {
   }, [treeData.nodes.length, treeData.activeNodeId]);
 
   const examplePrompts = [
-    "Do you want to know what is a neural network?",
-    "Want to learn about machine learning?",
-    "Curious about how AI works?",
-    "Want to explore deep learning?",
-    "Interested in natural language processing?",
-    "Want to understand transformers?",
-    "Curious about computer vision?",
-    "Want to learn about reinforcement learning?",
+    "What is a neural network?",
+    "I want to learn about machine learning",
+    "I am curious about how AI works?",
+    "What is deep learning?",
+    "What is natural language processing?",
+    "I want to understand transformers",
+    "I am curious about computer vision",
+    "I want to learn about reinforcement learning",
   ];
 
   useEffect(() => {
