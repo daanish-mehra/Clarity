@@ -17,3 +17,7 @@ build/
 .vscode/
 .idea/
 
+# Scripts with API keys should not be committed
+*run_server.sh
+*api_keys*.sh
+
