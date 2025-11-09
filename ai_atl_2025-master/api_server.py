@@ -1,8 +1,10 @@
 
 import os
+import json
 from typing import List, Dict, Optional, Tuple
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from gemini_image_context_chat import GeminiImageContextChat, ImageContextStorage
 from PIL import Image
@@ -395,6 +397,167 @@ async def delete_session(session_id: str):
     if session_id in token_stats:
         del token_stats[session_id]
     return {"message": f"Session {session_id} deleted"}
+
+
+@app.post("/api/download/json")
+async def download_json(request: StatsRequest):
+    """
+    Download the entire conversation tree as JSON.
+    
+    Returns a JSON file containing all nodes from the conversation tree.
+    """
+    session_id = request.session_id
+    tree = request.tree
+    
+    # Create JSON structure with all nodes (even if empty)
+    json_data = {
+        "session_id": session_id,
+        "exported_at": datetime.now().isoformat(),
+        "total_nodes": len(tree.nodes),
+        "nodes": [
+            {
+                "node_id": node.node_id,
+                "parent_id": node.parent_id,
+                "prompt": node.prompt,
+                "response": node.response,
+                "timestamp": node.timestamp,
+            }
+            for node in tree.nodes
+        ]
+    }
+    
+    # Convert to JSON string
+    json_string = json.dumps(json_data, indent=2, ensure_ascii=False)
+    
+    # Return as downloadable file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return Response(
+        content=json_string,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="conversation_tree_{session_id}_{timestamp}.json"'
+        }
+    )
+
+
+@app.post("/api/download/pdf")
+async def download_pdf(request: StatsRequest):
+    """
+    Download the entire conversation tree as PDF.
+    
+    Creates a PDF containing all messages from the conversation tree.
+    """
+    try:
+        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+        from reportlab.lib.enums import TA_LEFT
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="reportlab library is required for PDF generation. Install it with: pip install reportlab"
+        )
+    
+    session_id = request.session_id
+    tree = request.tree
+    
+    # Create a BytesIO buffer for the PDF
+    buffer = BytesIO()
+    
+    # Create PDF document
+    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+    story = []
+    
+    # Define styles
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        textColor='#000000',
+        spaceAfter=12,
+        alignment=TA_LEFT,
+    )
+    user_style = ParagraphStyle(
+        'UserStyle',
+        parent=styles['Normal'],
+        fontSize=11,
+        textColor='#007aff',
+        leftIndent=0,
+        spaceAfter=6,
+        fontName='Helvetica-Bold',
+    )
+    model_style = ParagraphStyle(
+        'ModelStyle',
+        parent=styles['Normal'],
+        fontSize=11,
+        textColor='#000000',
+        leftIndent=20,
+        spaceAfter=12,
+    )
+    
+    # Add title
+    story.append(Paragraph("Conversation Tree Export", title_style))
+    story.append(Paragraph(f"Session: {session_id}", styles['Normal']))
+    story.append(Paragraph(f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+    story.append(Paragraph(f"Total Nodes: {len(tree.nodes)}", styles['Normal']))
+    story.append(Spacer(1, 0.2*inch))
+    story.append(Paragraph("<hr/>", styles['Normal']))
+    story.append(Spacer(1, 0.2*inch))
+    
+    # Handle empty tree
+    if not tree.nodes:
+        story.append(Paragraph("No conversation nodes found.", styles['Normal']))
+    else:
+        # Add all nodes
+        for i, node in enumerate(tree.nodes):
+            # Add node header
+            story.append(Paragraph(f"<b>Node {i+1}</b> (ID: {node.node_id})", styles['Heading2']))
+            
+            # Add prompt (user message)
+            if node.prompt:
+                story.append(Paragraph("<b>USER:</b>", user_style))
+                # Escape HTML and wrap text
+                prompt_text = node.prompt.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                story.append(Paragraph(prompt_text, model_style))
+            
+            # Add response (model message)
+            if node.response:
+                story.append(Paragraph("<b>MODEL:</b>", user_style))
+                # Escape HTML and wrap text
+                response_text = node.response.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                story.append(Paragraph(response_text, model_style))
+            
+            # Add timestamp if available
+            if node.timestamp:
+                story.append(Paragraph(f"<i>Timestamp: {node.timestamp}</i>", styles['Italic']))
+            
+            # Add spacing between nodes (except last)
+            if i < len(tree.nodes) - 1:
+                story.append(Spacer(1, 0.3*inch))
+                story.append(Paragraph("<hr/>", styles['Normal']))
+                story.append(Spacer(1, 0.2*inch))
+    
+    # Build PDF
+    doc.build(story)
+    
+    # Get PDF bytes
+    buffer.seek(0)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    
+    # Return as downloadable file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="conversation_tree_{session_id}_{timestamp}.pdf"'
+        }
+    )
 
 
 @app.get("/api/health")

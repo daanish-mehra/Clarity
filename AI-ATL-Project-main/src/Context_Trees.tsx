@@ -1342,58 +1342,244 @@ export function ConversationTreeChatbot() {
       backgroundColor: theme.containerBg,
       fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif',
     }}>
-      {/* Theme Toggle Switch - Top Right */}
+      {/* Top Right Controls: Dark Mode, Download, Minimize/Maximize */}
       <div style={{
         position: 'absolute',
         top: '12px',
-        right: '60px',
+        right: '12px',
         display: 'flex',
         gap: '12px',
         alignItems: 'center',
-            zIndex: 50,
+        zIndex: 50,
+        flexDirection: 'row',
       }}>
-      {!isRightMinimized && (
-          <div style={{
+        {/* Dark Mode Toggle */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+        }}>
+          <span style={{
+            fontSize: '13px',
+            color: theme.secondaryText,
+            fontWeight: 500,
+          }}>
+            {isDarkMode ? 'Dark' : 'Light'}
+          </span>
+          <button
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            style={{
+              width: '44px',
+              height: '24px',
+              borderRadius: '12px',
+              border: 'none',
+              backgroundColor: isDarkMode ? theme.accent : theme.buttonBg,
+              cursor: 'pointer',
+              position: 'relative',
+              transition: 'background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            }}
+            title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          >
+            <div style={{
+              width: '20px',
+              height: '20px',
+              borderRadius: '50%',
+              backgroundColor: '#ffffff',
+              position: 'absolute',
+              top: '2px',
+              left: isDarkMode ? '22px' : '2px',
+              transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+            }} />
+          </button>
+        </div>
+
+        {/* Download Buttons */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+        }}>
+          <button
+            onClick={async () => {
+              if (treeData.nodes.length === 0) {
+                alert('No conversation to download. Start a conversation first.');
+                return;
+              }
+              
+              try {
+                const response = await fetch('http://localhost:8000/api/download/json', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    session_id: 'default',
+                    tree: {
+                      session_id: 'default',
+                      nodes: treeData.nodes.map(node => ({
+                        node_id: node.id,
+                        parent_id: node.parentId,
+                        prompt: node.prompt,
+                        response: node.response,
+                        timestamp: typeof node.timestamp === 'string' ? node.timestamp : node.timestamp.toISOString(),
+                      })),
+                    },
+                  }),
+                });
+                
+                if (!response.ok) {
+                  throw new Error('Failed to download JSON');
+                }
+                
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+                a.download = `conversation_tree_${timestamp}.json`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+              } catch (error) {
+                console.error('Error downloading JSON:', error);
+                alert('Failed to download JSON. Please try again.');
+              }
+            }}
+            disabled={treeData.nodes.length === 0}
+            style={{
+              padding: '6px 12px',
+              fontSize: '13px',
+              fontWeight: 500,
+              border: `1px solid ${theme.buttonBorder}`,
+              backgroundColor: treeData.nodes.length === 0 ? theme.buttonBg : theme.buttonBg,
+              color: treeData.nodes.length === 0 ? theme.secondaryText : theme.buttonText,
+              borderRadius: '6px',
+              cursor: treeData.nodes.length === 0 ? 'not-allowed' : 'pointer',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+              transition: 'all 0.2s ease',
+              opacity: treeData.nodes.length === 0 ? 0.5 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (treeData.nodes.length > 0) {
+                e.currentTarget.style.backgroundColor = theme.hoverBg;
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = theme.buttonBg;
+            }}
+            title={treeData.nodes.length === 0 ? 'No conversation to download' : 'Download as JSON'}
+          >
+            JSON
+          </button>
+          <button
+            onClick={async () => {
+              if (treeData.nodes.length === 0) {
+                alert('No conversation to download. Start a conversation first.');
+                return;
+              }
+              
+              try {
+                const response = await fetch('http://localhost:8000/api/download/pdf', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    session_id: 'default',
+                    tree: {
+                      session_id: 'default',
+                      nodes: treeData.nodes.map(node => ({
+                        node_id: node.id,
+                        parent_id: node.parentId,
+                        prompt: node.prompt,
+                        response: node.response,
+                        timestamp: typeof node.timestamp === 'string' ? node.timestamp : node.timestamp.toISOString(),
+                      })),
+                    },
+                  }),
+                });
+                
+                if (!response.ok) {
+                  const errorText = await response.text();
+                  throw new Error(errorText || 'Failed to download PDF');
+                }
+                
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+                a.download = `conversation_tree_${timestamp}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+              } catch (error) {
+                console.error('Error downloading PDF:', error);
+                alert(`Failed to download PDF: ${error instanceof Error ? error.message : 'Unknown error'}. Make sure reportlab is installed: pip install reportlab`);
+              }
+            }}
+            disabled={treeData.nodes.length === 0}
+            style={{
+              padding: '6px 12px',
+              fontSize: '13px',
+              fontWeight: 500,
+              border: `1px solid ${theme.buttonBorder}`,
+              backgroundColor: treeData.nodes.length === 0 ? theme.buttonBg : theme.buttonBg,
+              color: treeData.nodes.length === 0 ? theme.secondaryText : theme.buttonText,
+              borderRadius: '6px',
+              cursor: treeData.nodes.length === 0 ? 'not-allowed' : 'pointer',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+              transition: 'all 0.2s ease',
+              opacity: treeData.nodes.length === 0 ? 0.5 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (treeData.nodes.length > 0) {
+                e.currentTarget.style.backgroundColor = theme.hoverBg;
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = theme.buttonBg;
+            }}
+            title={treeData.nodes.length === 0 ? 'No conversation to download' : 'Download as PDF'}
+          >
+            PDF
+          </button>
+        </div>
+
+        {/* Right Panel Minimize/Maximize Toggle */}
+        <button
+          onClick={() => setIsRightMinimized(!isRightMinimized)}
+          style={{
+            width: '28px',
+            height: '28px',
+            padding: '0',
+            fontSize: '16px',
+            fontWeight: 600,
+            border: `1px solid ${theme.buttonBorder}`,
+            backgroundColor: theme.buttonBg,
+            color: theme.buttonText,
+            borderRadius: '6px',
+            cursor: 'pointer',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
-          }}>
-            <span style={{
-              fontSize: '13px',
-              color: theme.secondaryText,
-              fontWeight: 500,
-            }}>
-              {isDarkMode ? 'Dark' : 'Light'}
-            </span>
-        <button
-          onClick={() => setIsDarkMode(!isDarkMode)}
-          style={{
-                width: '44px',
-                height: '24px',
-                borderRadius: '12px',
-                border: 'none',
-                backgroundColor: isDarkMode ? theme.accent : theme.buttonBg,
-                cursor: 'pointer',
-                position: 'relative',
-                transition: 'background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            justifyContent: 'center',
+            transition: 'all 0.2s ease',
           }}
-          title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = theme.hoverBg;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = theme.buttonBg;
+          }}
+          title={isRightMinimized ? 'Show Graph' : 'Hide Graph'}
         >
-              <div style={{
-                width: '20px',
-                height: '20px',
-                borderRadius: '50%',
-                backgroundColor: '#ffffff',
-            position: 'absolute',
-                top: '2px',
-                left: isDarkMode ? '22px' : '2px',
-                transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-              }} />
+          {isRightMinimized ? '+' : '−'}
         </button>
-          </div>
-        )}
       </div>
 
       {/* Left Side: Chatbot */}
@@ -2044,36 +2230,6 @@ export function ConversationTreeChatbot() {
           backdropFilter: 'blur(20px)',
         }}
       >
-        {/* Minimize Button - top right */}
-        <div style={{
-          position: 'absolute',
-          top: '10px',
-          right: '10px',
-          zIndex: 15,
-        }}>
-        <button
-          onClick={() => setIsRightMinimized(true)}
-          style={{
-            width: '28px',
-            height: '28px',
-            padding: '0',
-            fontSize: '16px',
-            fontWeight: 600,
-              border: `1px solid ${theme.buttonBorder}`,
-              backgroundColor: theme.buttonBg,
-              color: theme.buttonText,
-            borderRadius: '6px',
-            cursor: 'pointer',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          −
-        </button>
-        </div>
-
       {/* Search Bar */}
       <div style={{
         padding: '8px 12px',
@@ -2234,35 +2390,6 @@ export function ConversationTreeChatbot() {
         </ReactFlow>
       </div>
       </div>
-
-      {/* Show Graph Button (when right is minimized) */}
-      {isRightMinimized && (
-        <button
-          onClick={() => setIsRightMinimized(false)}
-          style={{
-            position: 'absolute',
-            top: '10px',
-            right: '10px',
-            width: '28px',
-            height: '28px',
-            padding: '0',
-            fontSize: '16px',
-            fontWeight: 600,
-            border: '1px solid #3b82f6',
-            backgroundColor: '#ffffff',
-            color: '#3b82f6',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            zIndex: 30,
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          +
-        </button>
-      )}
 
       {/* Custom Delete Confirmation Modal */}
       {nodeToDelete && (
