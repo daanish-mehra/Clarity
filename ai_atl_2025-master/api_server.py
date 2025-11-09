@@ -67,6 +67,7 @@ class TokenStatsResponse(BaseModel):
     total_text_equivalent_tokens: int
     total_token_savings: int
     average_savings_per_call: float
+    cost_savings: float  # Cost savings in dollars ($0.30 per million tokens)
     calls: List[Dict]
 
 
@@ -313,6 +314,10 @@ async def calculate_token_stats(request: StatsRequest):
         # Token savings: Text equivalent - Vision tokens (no prompt for stats)
         token_savings = text_equivalent_total - vision_tokens
         
+        # Calculate cost savings: Gemini charges $0.30 per million tokens
+        # Cost savings = (token_savings / 1,000,000) * 0.30
+        cost_savings = (token_savings / 1_000_000) * 0.30
+        
         # Count API calls in the entire tree (each node = 1 API call = user + model message)
         api_calls_count = len(tree.nodes)
     else:
@@ -320,6 +325,7 @@ async def calculate_token_stats(request: StatsRequest):
         text_equivalent_total = 0
         prompt_text_tokens = 0
         token_savings = 0
+        cost_savings = 0.0
         api_calls_count = 0
         context_image = None
     
@@ -331,6 +337,7 @@ async def calculate_token_stats(request: StatsRequest):
         total_text_equivalent_tokens=text_equivalent_total,
         total_token_savings=token_savings,
         average_savings_per_call=token_savings / api_calls_count if api_calls_count > 0 else 0,
+        cost_savings=cost_savings,
         calls=[]  # Don't return individual call stats for branch-based calculation
     )
 
@@ -353,6 +360,7 @@ async def get_token_stats(session_id: str):
             total_text_equivalent_tokens=0,
             total_token_savings=0,
             average_savings_per_call=0,
+            cost_savings=0.0,
             calls=[]
         )
     
@@ -364,6 +372,9 @@ async def get_token_stats(session_id: str):
     total_savings = sum(s['token_savings'] for s in stats)
     avg_savings = total_savings / len(stats) if stats else 0
     
+    # Calculate cost savings: Gemini charges $0.30 per million tokens
+    cost_savings = (total_savings / 1_000_000) * 0.30
+    
     return TokenStatsResponse(
         session_id=session_id,
         total_api_calls=len(stats),
@@ -372,6 +383,7 @@ async def get_token_stats(session_id: str):
         total_text_equivalent_tokens=total_text_equiv,
         total_token_savings=total_savings,
         average_savings_per_call=avg_savings,
+        cost_savings=cost_savings,
         calls=stats
     )
 

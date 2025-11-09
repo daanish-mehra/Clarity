@@ -13,6 +13,7 @@ interface TokenStats {
   total_text_equivalent_tokens: number;
   total_token_savings: number;
   average_savings_per_call: number;
+  cost_savings: number;  // Cost savings in dollars ($0.30 per million tokens)
   calls: Array<{
     node_id: string;
     vision_tokens: number;
@@ -50,6 +51,7 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
     textEquivalent: 0,
     savings: 0,
     savingsPercent: 0,
+    costSavings: 0,
   });
   const [isVisible, setIsVisible] = useState(false);
   const [hasAnimated, setHasAnimated] = useState(false);
@@ -182,6 +184,12 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
           setAnimatedValues(prev => ({ ...prev, savingsPercent: val }));
         });
       }, 300);
+      
+      setTimeout(() => {
+        animateValue(0, stats.cost_savings || 0, (val) => {
+          setAnimatedValues(prev => ({ ...prev, costSavings: val }));
+        });
+      }, 350);
     } else if (stats && !loading && hasAnimated) {
       setAnimatedValues({
         totalCalls: stats.total_api_calls,
@@ -189,6 +197,7 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
         textEquivalent: stats.total_text_equivalent_tokens,
         savings: stats.total_token_savings,
         savingsPercent: calculateSavingsPercent(stats) * 100,
+        costSavings: stats.cost_savings || 0,
       });
       setIsVisible(true);
     }
@@ -242,6 +251,15 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
 
   const formatPercent = (num: number) => {
     return `${(num * 100).toFixed(1)}%`;
+  };
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 4,
+      maximumFractionDigits: 4,
+    }).format(amount);
   };
 
   const calculateSavingsPercent = (statsData: TokenStats | null) => {
@@ -498,6 +516,44 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
             letterSpacing: '-0.3px',
           }}>
             {isVisible ? formatPercent(animatedValues.savingsPercent / 100) : '0%'} saved
+          </div>
+        </div>
+
+        <div 
+          style={{
+            backgroundColor: 'transparent',
+            padding: '0',
+            transition: 'opacity 0.2s ease',
+            animation: hasAnimated ? 'none' : 'slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.45s both',
+          }}
+        >
+          <div style={{ 
+            fontSize: '17px', 
+            color: theme.secondaryText, 
+            marginBottom: '8px', 
+            fontWeight: 400,
+            letterSpacing: '-0.2px',
+          }}>
+            Cost Savings
+          </div>
+          <div style={{ 
+            fontSize: '64px', 
+            fontWeight: 600, 
+            color: theme.text, 
+            letterSpacing: '-2px',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif',
+            lineHeight: '1.1',
+          }}>
+            {isVisible ? formatCurrency(animatedValues.costSavings) : '$0.0000'}
+          </div>
+          <div style={{ 
+            fontSize: '21px', 
+            color: theme.secondaryText, 
+            marginTop: '8px', 
+            fontWeight: 400,
+            letterSpacing: '-0.3px',
+          }}>
+            at $0.30 per million tokens
           </div>
         </div>
       </div>
