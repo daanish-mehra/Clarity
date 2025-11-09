@@ -74,9 +74,8 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
 
   const fetchStats = async () => {
     try {
-      // If we have tree and active node, use the new calculate endpoint
-      if (tree && activeNodeId) {
-        const activeNodePath = getActiveNodePath();
+      // If we have tree, use the new calculate endpoint with entire conversation
+      if (tree && tree.nodes.length > 0) {
         const response = await fetch('http://localhost:8000/api/stats/calculate', {
           method: 'POST',
           headers: {
@@ -94,7 +93,7 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
                 timestamp: typeof node.timestamp === 'string' ? node.timestamp : node.timestamp.toISOString(),
               })),
             },
-            active_node_path: activeNodePath,
+            // active_node_path is optional and not used - we calculate based on entire tree
           }),
         });
         
@@ -105,7 +104,7 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
         setStats(data);
         setError(null);
       } else {
-        // Fallback to old endpoint if no tree/active node
+        // Fallback to old endpoint if no tree
         const response = await fetch(`http://localhost:8000/api/stats/${sessionId}`);
         if (!response.ok) {
           throw new Error('Failed to fetch stats');
@@ -203,7 +202,7 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
     return () => {
       clearInterval(interval);
     };
-  }, [sessionId, tree, activeNodeId]);
+  }, [sessionId, tree, tree?.nodes.length]);
 
   const theme = isDarkMode ? {
     bg: '#0a1220', // Dark blue background

@@ -259,83 +259,62 @@ class StatsRequest(BaseModel):
 @app.post("/api/stats/calculate", response_model=TokenStatsResponse)
 async def calculate_token_stats(request: StatsRequest):
     """
-    Calculate token statistics based on the active conversation branch.
+    Calculate token statistics based on the ENTIRE conversation tree.
     
-    This creates ONE image of the entire active branch and calculates:
-    - Vision tokens: Based on the single context image (ceil(height/768) * 258)
-    - Text tokens: Based on all messages in the active branch (total chars / 4)
-    - Token savings: Text equivalent - (Vision tokens + Prompt tokens)
+    This creates ONE image of ALL messages from ALL branches and calculates:
+    - Vision tokens: Based on the single comprehensive image (ceil(height/768) * 258)
+    - Text tokens: Based on all messages in the entire tree (total chars / 4)
+    - Token savings: Text equivalent - Vision tokens
+    
+    Note: Order of messages doesn't matter - all messages from all branches are included.
     """
     session_id = request.session_id
     tree = request.tree
-    active_node_path = request.active_node_path or []
     
-    # Get the active branch context (all messages in the active path)
-    if active_node_path:
-        context_messages = get_path_context(active_node_path, tree.nodes)
-    else:
-        # If no active path, use the longest branch (root to deepest leaf)
-        node_map = {node.node_id: node for node in tree.nodes}
-        root_nodes = [node for node in tree.nodes if not node.parent_id]
-        
-        def find_longest_path(current_id: str, path: List[str]) -> List[str]:
-            if current_id not in node_map:
-                return path
-            current_path = path + [current_id]
-            children = [node for node in tree.nodes if node.parent_id == current_id]
-            if not children:
-                return current_path
-            longest = current_path
-            for child in children:
-                child_path = find_longest_path(child.node_id, current_path)
-                if len(child_path) > len(longest):
-                    longest = child_path
-            return longest
-        
-        longest_path = []
-        for root in root_nodes:
-            path = find_longest_path(root.node_id, [])
-            if len(path) > len(longest_path):
-                longest_path = path
-        
-        context_messages = get_path_context(longest_path, tree.nodes) if longest_path else []
+    # Get ALL messages from ALL nodes in the tree (regardless of branch)
+    # Each node contributes: user message (prompt) + model message (response)
+    all_messages = []
+    for node in tree.nodes:
+        if node.prompt:
+            all_messages.append({'role': 'user', 'content': node.prompt})
+        if node.response:
+            all_messages.append({'role': 'model', 'content': node.response})
     
     # Get or create chat session for token estimation
     chat = get_or_create_session(session_id)
     image_storage = ImageContextStorage()
     
-    # Calculate tokens based on the active branch
-    if context_messages:
-        # Create ONE image of the entire active branch
-        context_image = image_storage.messages_to_image(context_messages)
+    # Calculate tokens based on the entire conversation tree
+    if all_messages:
+        # Create ONE image of the entire conversation (all messages from all branches)
+        context_image = image_storage.messages_to_image(all_messages)
         
         # Save the context image for this stats calculation
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
         image_filename = f"stats_context_{session_id}_{timestamp}.png"
         image_path = os.path.join(CONTEXT_IMAGES_DIR, image_filename)
         context_image.save(image_path)
-        print(f"[Stats Calculation] Context image saved: {image_path}")
+        print(f"[Stats Calculation] Entire conversation image saved: {image_path}")
         
-        # Calculate vision tokens for this single image
+        # Calculate vision tokens for this single comprehensive image
         # Formula: ceil(height / 768) * 258 tokens
         vision_tokens = chat.estimate_vision_tokens(context_image, verbose=True)
-        print(f"[Stats Calculation] Active branch image: {context_image.width}x{context_image.height}px = {vision_tokens} vision tokens")
+        print(f"[Stats Calculation] Entire conversation image: {context_image.width}x{context_image.height}px = {vision_tokens} vision tokens")
         
-        # Calculate text equivalent: total characters in active branch / 4
-        total_text_chars = sum(len(msg['content']) for msg in context_messages)
+        # Calculate text equivalent: total characters in entire conversation / 4
+        total_text_chars = sum(len(msg['content']) for msg in all_messages)
         text_equivalent_total = total_text_chars // 4
-        print(f"[Stats Calculation] Active branch text: {total_text_chars} chars / 4 = {text_equivalent_total} tokens")
+        print(f"[Stats Calculation] Entire conversation text: {total_text_chars} chars / 4 = {text_equivalent_total} tokens")
+        print(f"[Stats Calculation] Total nodes in tree: {len(tree.nodes)}")
         
         # For stats display, we don't need prompt tokens (no new user message)
-        # But if we want to show savings, we can estimate based on a typical prompt
-        # For now, set to 0 since we're just showing the context cost
         prompt_text_tokens = 0
         
         # Token savings: Text equivalent - Vision tokens (no prompt for stats)
         token_savings = text_equivalent_total - vision_tokens
         
-        # Count API calls in the active branch (each call = user + model message)
-        api_calls_count = len(context_messages) // 2
+        # Count API calls in the entire tree (each node = 1 API call = user + model message)
+        api_calls_count = len(tree.nodes)
     else:
         vision_tokens = 0
         text_equivalent_total = 0
