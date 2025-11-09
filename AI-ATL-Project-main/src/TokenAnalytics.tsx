@@ -1,6 +1,5 @@
 /**
- * Token Analytics Component
- * Displays token usage statistics, savings, and cost analysis
+ * Token Analytics
  */
 
 import React, { useState, useEffect } from 'react';
@@ -13,7 +12,7 @@ interface TokenStats {
   total_text_equivalent_tokens: number;
   total_token_savings: number;
   average_savings_per_call: number;
-  cost_savings: number;  // Cost savings in dollars ($0.30 per million tokens)
+  cost_savings: number;  // cost savings in dollars
   calls: Array<{
     node_id: string;
     vision_tokens: number;
@@ -56,17 +55,19 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
   const [isVisible, setIsVisible] = useState(false);
   const [hasAnimated, setHasAnimated] = useState(false);
 
-  // Helper function to get path from root to active node
+  // helper function to get path from root to active node
   const getActiveNodePath = (): string[] => {
-    if (!tree || !activeNodeId) return [];
+    if (!tree || !activeNodeId) {
+      return [];
+    }
     
     const nodeMap = new Map(tree.nodes.map(n => [n.id, n]));
     const path: string[] = [];
     let currentId: string | null = activeNodeId;
     
-    // Build path from active node to root
+    // build path from active node to root
     while (currentId) {
-      path.unshift(currentId); // Add to beginning
+      path.unshift(currentId);
       const node = nodeMap.get(currentId);
       currentId = node?.parentId || null;
     }
@@ -76,7 +77,7 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
 
   const fetchStats = async () => {
     try {
-      // If we have tree, use the new calculate endpoint with entire conversation
+      // if we have tree, use the new calculate endpoint with entire conversation
       if (tree && tree.nodes.length > 0) {
         const response = await fetch('http://localhost:8000/api/stats/calculate', {
           method: 'POST',
@@ -95,7 +96,7 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
                 timestamp: typeof node.timestamp === 'string' ? node.timestamp : node.timestamp.toISOString(),
               })),
             },
-            // active_node_path is optional and not used - we calculate based on entire tree
+            // active_node_path is optional and not used - calculate based on entire tree
           }),
         });
         
@@ -106,7 +107,7 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
         setStats(data);
         setError(null);
       } else {
-        // Fallback to old endpoint if no tree
+        // fallback to old endpoint if no tree
         const response = await fetch(`http://localhost:8000/api/stats/${sessionId}`);
         if (!response.ok) {
           throw new Error('Failed to fetch stats');
@@ -214,12 +215,12 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
   }, [sessionId, tree, tree?.nodes.length]);
 
   const theme = isDarkMode ? {
-    bg: '#0a1220', // Dark blue background
-    cardBg: '#0f172a', // Dark blue slate
-    text: '#e0f2fe', // Light blue text
-    secondaryText: '#94a3b8', // Muted blue-gray
-    border: 'rgba(96, 165, 250, 0.2)', // Blue border
-    accent: '#60a5fa', // Light blue accent
+    bg: '#0a1220', 
+    cardBg: '#0f172a', 
+    text: '#e0f2fe', 
+    secondaryText: '#94a3b8', 
+    border: 'rgba(96, 165, 250, 0.2)', 
+    accent: '#60a5fa', 
     accentLight: '#93c5fd',
     vision: '#8b5cf6',
     textToken: '#06b6d4',
@@ -229,12 +230,12 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
     surface: '#1e293b',
     shadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
   } : {
-    bg: '#ffffff', // White background
-    cardBg: '#f0f7ff', // Light blue background
-    text: '#003d7a', // Dark blue text
-    secondaryText: '#5a9bd4', // Medium blue-gray
-    border: 'rgba(0, 122, 255, 0.15)', // Light blue border
-    accent: '#007aff', // Apple blue
+    bg: '#ffffff', 
+    cardBg: '#f0f7ff', 
+    text: '#003d7a',
+    secondaryText: '#5a9bd4', 
+    border: 'rgba(0, 122, 255, 0.15)', 
+    accent: '#007aff', 
     accentLight: '#5ac8fa',
     vision: '#5856d6',
     textToken: '#0071e3',
@@ -264,8 +265,7 @@ export function TokenAnalytics({ sessionId = 'default', tree, activeNodeId, isDa
 
   const calculateSavingsPercent = (statsData: TokenStats | null) => {
     if (!statsData || statsData.total_text_equivalent_tokens === 0) return 0;
-    // Calculate savings as a percentage of what we would have spent (text equivalent)
-    // This ensures we always show a positive percentage when there's any context
+   
     const savings = Math.max(0, statsData.total_token_savings);
     return savings / statsData.total_text_equivalent_tokens;
   };

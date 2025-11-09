@@ -1,9 +1,5 @@
 /**
- * Conversation Tree Chatbot with React Flow
- * 
- * Each node contains both prompt and response.
- * Editing prompts creates new branches.
- * Sending new prompts creates connected nodes.
+ * Front End
  */
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';

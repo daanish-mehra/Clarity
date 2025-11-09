@@ -14,7 +14,7 @@ from datetime import datetime
 
 app = FastAPI(title="Gemini Image Context Chat API")
 
-# Create context images directory if it doesn't exist
+# create context images directory
 CONTEXT_IMAGES_DIR = "context_images"
 os.makedirs(CONTEXT_IMAGES_DIR, exist_ok=True)
 
@@ -47,8 +47,8 @@ class ConversationTree(BaseModel):
 class MessageRequest(BaseModel):
     session_id: str
     user_message: str
-    parent_node_id: Optional[str] = None  # The node to branch from (null for root)
-    tree: ConversationTree  # Include tree in the request
+    parent_node_id: Optional[str] = None  # the node to branch from (null for root)
+    tree: ConversationTree  
 
 
 class MessageResponse(BaseModel):
@@ -69,13 +69,13 @@ class TokenStatsResponse(BaseModel):
     total_text_equivalent_tokens: int
     total_token_savings: int
     average_savings_per_call: float
-    cost_savings: float  # Cost savings in dollars ($0.30 per million tokens)
+    cost_savings: float  # cost savings in dollars
     calls: List[Dict]
 
 
 class BranchContextRequest(BaseModel):
     session_id: str
-    node_path: List[str]  # List of node IDs from root to target node
+    node_path: List[str]  # list of node IDs from root to target node
 
 
 def get_or_create_session(session_id: str) -> GeminiImageContextChat:
@@ -92,7 +92,7 @@ def get_path_context(node_path: List[str], all_nodes: List[NodePath]) -> List[Di
     if not node_path:
         return []
     
-    # This creates a map with node ids as keys
+    # creates a map with node IDs as keys
     node_map = {node.node_id: node for node in all_nodes}
     
     messages = []
@@ -114,11 +114,10 @@ def send_message_with_context(chat: GeminiImageContextChat, context_messages: Li
     text_equivalent_tokens = 0
     
     if context_messages:
-        # Create context image from entire chat history (all messages in context_messages)
-        # The image will contain all previous messages at 768px width, height scales as needed
+       
         context_image = image_storage.messages_to_image(context_messages)
         
-        # Save context image to disk
+        
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Include milliseconds
         if node_id:
             image_filename = f"context_{session_id}_{node_id}_{timestamp}.png"
@@ -128,24 +127,20 @@ def send_message_with_context(chat: GeminiImageContextChat, context_messages: Li
         context_image.save(image_path)
         print(f"Context image saved: {image_path}")
         
-        # Estimate vision tokens for the context image
-        # Formula: ceil(height / 768) * 258 tokens for 768px width image
-        # IMPORTANT: Each API call sends a NEW image to Gemini, so we count vision tokens for THIS call.
-        # Even though the image contains all context, Gemini charges tokens for each image sent in each API call.
+        # each 768 x 768 px image costs 258 vision tokens
+    
         vision_tokens = chat.estimate_vision_tokens(context_image, verbose=True)
         print(f"[Token Calculation] Image: {context_image.width}x{context_image.height}px = {vision_tokens} vision tokens")
         
-        # Calculate Text Equivalent: total characters in ENTIRE chat history (context + user message) / 4
-        # This represents what it would cost to send all messages as text
+        # calculate text equivalent: total characters in entire chat history (context + user message) / 4
+        # this represents what it would cost to send all messages as text
         context_text_chars = sum(len(msg['content']) for msg in context_messages)
         user_message_chars = len(user_message)
         total_text_chars = context_text_chars + user_message_chars
         text_equivalent_total = total_text_chars // 4
         print(f"[Token Calculation] Text Equivalent: {total_text_chars} chars / 4 = {text_equivalent_total} tokens")
         
-        # Prompt text for image method (matches the format used in gemini_image_context_chat.py)
-        # NOTE: The prompt_parts list contains: [text_string, image, text_string]
-        # Gemini will count: vision tokens for the image + text tokens for the text strings
+        
         prompt_text = f"Here is our conversation history as an image:\nUser's new message: {user_message}\n\nPlease respond naturally based on the conversation history shown in the image."
         prompt_parts = [
             "Here is our conversation history as an image:",
@@ -153,16 +148,14 @@ def send_message_with_context(chat: GeminiImageContextChat, context_messages: Li
             f"\nUser's new message: {user_message}\n\nPlease respond naturally based on the conversation history shown in the image."
         ]
     else:
-        # First message, no context
         context_image = None
         vision_tokens = 0
         prompt_parts = [user_message]
         prompt_text = user_message
-        # Text Equivalent for first message is just the user message
         text_equivalent_total = len(user_message) // 4
     
-    # Calculate prompt text tokens for image method
-    # This counts ONLY the text prompt, NOT the image (image is counted separately as vision_tokens)
+    # calculate prompt text tokens for image method
+    # counts only text prompts
     text_tokens = chat.estimate_text_tokens(prompt_text)
     print(f"[Token Calculation] Prompt text tokens: {text_tokens} tokens")
     print(f"[Token Calculation] Total for this API call: {vision_tokens} vision + {text_tokens} text = {vision_tokens + text_tokens} tokens")
@@ -172,14 +165,10 @@ def send_message_with_context(chat: GeminiImageContextChat, context_messages: Li
     
     # Calculate token savings: Text Equivalent - (Vision Tokens + Prompt Text Tokens)
     # Formula: Token Savings = Text Equivalent - (Vision Tokens + Prompt Text Tokens)
-    # This compares:
-    #   - Text method: Send all messages as text = text_equivalent_total tokens
-    #   - Image method: Send context as image + prompt text = vision_tokens + text_tokens
     if context_messages:
         token_savings = text_equivalent_total - (vision_tokens + text_tokens)
         print(f"[Token Calculation] Savings: {text_equivalent_total} - ({vision_tokens} + {text_tokens}) = {token_savings} tokens")
     else:
-        # No savings on first message (no context to compress)
         token_savings = 0
     
     return response_text, context_image, {
@@ -274,8 +263,7 @@ async def calculate_token_stats(request: StatsRequest):
     session_id = request.session_id
     tree = request.tree
     
-    # Get ALL messages from ALL nodes in the tree (regardless of branch)
-    # Each node contributes: user message (prompt) + model message (response)
+    
     all_messages = []
     for node in tree.nodes:
         if node.prompt:
@@ -283,44 +271,41 @@ async def calculate_token_stats(request: StatsRequest):
         if node.response:
             all_messages.append({'role': 'model', 'content': node.response})
     
-    # Get or create chat session for token estimation
+    # get or create chat session for token estimation
     chat = get_or_create_session(session_id)
     image_storage = ImageContextStorage()
     
-    # Calculate tokens based on the entire conversation tree
+    # calculate tokens based on the entire conversation tree
     if all_messages:
-        # Create ONE image of the entire conversation (all messages from all branches)
+        # create an image of the entire conversation tree
         context_image = image_storage.messages_to_image(all_messages)
         
-        # Save the context image for this stats calculation
+        # save the context image for this stats calculation
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
         image_filename = f"stats_context_{session_id}_{timestamp}.png"
         image_path = os.path.join(CONTEXT_IMAGES_DIR, image_filename)
         context_image.save(image_path)
         print(f"[Stats Calculation] Entire conversation image saved: {image_path}")
         
-        # Calculate vision tokens for this single comprehensive image
-        # Formula: ceil(height / 768) * 258 tokens
+       
         vision_tokens = chat.estimate_vision_tokens(context_image, verbose=True)
         print(f"[Stats Calculation] Entire conversation image: {context_image.width}x{context_image.height}px = {vision_tokens} vision tokens")
         
-        # Calculate text equivalent: total characters in entire conversation / 4
+        # calculate text equivalent: total characters in entire conversation / 4
         total_text_chars = sum(len(msg['content']) for msg in all_messages)
         text_equivalent_total = total_text_chars // 4
         print(f"[Stats Calculation] Entire conversation text: {total_text_chars} chars / 4 = {text_equivalent_total} tokens")
         print(f"[Stats Calculation] Total nodes in tree: {len(tree.nodes)}")
         
-        # For stats display, we don't need prompt tokens (no new user message)
+ 
         prompt_text_tokens = 0
         
-        # Token savings: Text equivalent - Vision tokens (no prompt for stats)
+        
         token_savings = text_equivalent_total - vision_tokens
         
-        # Calculate cost savings: Gemini charges $0.30 per million tokens
-        # Cost savings = (token_savings / 1,000,000) * 0.30
         cost_savings = (token_savings / 1_000_000) * 0.30
         
-        # Count API calls in the entire tree (each node = 1 API call = user + model message)
+        # count API calls in the tree
         api_calls_count = len(tree.nodes)
     else:
         vision_tokens = 0
@@ -340,7 +325,7 @@ async def calculate_token_stats(request: StatsRequest):
         total_token_savings=token_savings,
         average_savings_per_call=token_savings / api_calls_count if api_calls_count > 0 else 0,
         cost_savings=cost_savings,
-        calls=[]  # Don't return individual call stats for branch-based calculation
+        calls=[]
     )
 
 
@@ -366,7 +351,7 @@ async def get_token_stats(session_id: str):
             calls=[]
         )
     
-    # Sum up tokens from individual API calls (legacy behavior)
+    # sum up tokens from individual API calls
     stats = token_stats[session_id]
     total_vision = sum(s['vision_tokens'] for s in stats)
     total_text = sum(s['text_tokens'] for s in stats)
@@ -374,7 +359,7 @@ async def get_token_stats(session_id: str):
     total_savings = sum(s['token_savings'] for s in stats)
     avg_savings = total_savings / len(stats) if stats else 0
     
-    # Calculate cost savings: Gemini charges $0.30 per million tokens
+   # looks at cost savings
     cost_savings = (total_savings / 1_000_000) * 0.30
     
     return TokenStatsResponse(
@@ -409,7 +394,6 @@ async def download_json(request: StatsRequest):
     session_id = request.session_id
     tree = request.tree
     
-    # Create JSON structure with all nodes (even if empty)
     json_data = {
         "session_id": session_id,
         "exported_at": datetime.now().isoformat(),
@@ -425,11 +409,11 @@ async def download_json(request: StatsRequest):
             for node in tree.nodes
         ]
     }
+
+    # make a downloadable file
     
-    # Convert to JSON string
     json_string = json.dumps(json_data, indent=2, ensure_ascii=False)
     
-    # Return as downloadable file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return Response(
         content=json_string,
@@ -464,14 +448,12 @@ async def download_pdf(request: StatsRequest):
     session_id = request.session_id
     tree = request.tree
     
-    # Create a BytesIO buffer for the PDF
     buffer = BytesIO()
     
-    # Create PDF document
+    # create the PDF file
     doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
     story = []
     
-    # Define styles
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
         'CustomTitle',
@@ -499,7 +481,6 @@ async def download_pdf(request: StatsRequest):
         spaceAfter=12,
     )
     
-    # Add title
     story.append(Paragraph("Conversation Tree Export", title_style))
     story.append(Paragraph(f"Session: {session_id}", styles['Normal']))
     story.append(Paragraph(f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
@@ -508,48 +489,33 @@ async def download_pdf(request: StatsRequest):
     story.append(Paragraph("<hr/>", styles['Normal']))
     story.append(Spacer(1, 0.2*inch))
     
-    # Handle empty tree
+    # handling an empty tree
     if not tree.nodes:
         story.append(Paragraph("No conversation nodes found.", styles['Normal']))
     else:
-        # Add all nodes
         for i, node in enumerate(tree.nodes):
-            # Add node header
             story.append(Paragraph(f"<b>Node {i+1}</b> (ID: {node.node_id})", styles['Heading2']))
-            
-            # Add prompt (user message)
             if node.prompt:
                 story.append(Paragraph("<b>USER:</b>", user_style))
-                # Escape HTML and wrap text
                 prompt_text = node.prompt.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                 story.append(Paragraph(prompt_text, model_style))
-            
-            # Add response (model message)
             if node.response:
                 story.append(Paragraph("<b>MODEL:</b>", user_style))
-                # Escape HTML and wrap text
                 response_text = node.response.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                 story.append(Paragraph(response_text, model_style))
-            
-            # Add timestamp if available
             if node.timestamp:
                 story.append(Paragraph(f"<i>Timestamp: {node.timestamp}</i>", styles['Italic']))
-            
-            # Add spacing between nodes (except last)
             if i < len(tree.nodes) - 1:
                 story.append(Spacer(1, 0.3*inch))
                 story.append(Paragraph("<hr/>", styles['Normal']))
                 story.append(Spacer(1, 0.2*inch))
     
-    # Build PDF
     doc.build(story)
     
-    # Get PDF bytes
     buffer.seek(0)
     pdf_bytes = buffer.getvalue()
     buffer.close()
     
-    # Return as downloadable file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return Response(
         content=pdf_bytes,
